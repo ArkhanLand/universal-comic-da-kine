@@ -12,7 +12,6 @@ class Creator:
 class Page:
     number: int
     url: str
-    filename: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

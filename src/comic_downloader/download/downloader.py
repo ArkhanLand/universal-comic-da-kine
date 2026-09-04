@@ -43,12 +43,8 @@ class Downloader:
 
     @staticmethod
     def _extension_for(page: Page) -> str:
-        if page.filename:
-            suffix = Path(page.filename).suffix
-            if suffix:
-                return suffix.lower()
-        suffix = Path(urlparse(page.url).path).suffix
-        return suffix.lower() if suffix else ".jpg"
+        suffix = Path(urlparse(page.url).path).suffix.lower()
+        return suffix if suffix else ".jpg"
 
     @staticmethod
     def _cached_pages(pages_dir: Path) -> list[Path]:
