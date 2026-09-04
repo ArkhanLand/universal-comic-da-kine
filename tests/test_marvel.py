@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from comic_downloader.services.marvel_unlimited import MarvelService
@@ -44,18 +45,30 @@ def test_get_catalog_id(comic_input: str, expected: str) -> None:
     else:
         assert service.get_catalog_id(comic_input) == expected
 
+
 @pytest.mark.parametrize(
     ("catalog_id", "expected"),
     [
-        ("72984", NotImplementedError),
+        ("72984", "51975"),
     ],
-    ids=[
-        "get_digital_id is not implemented yet"
-    ],
+    ids=["get_digital_id works with a mock server"],
 )
 def test_get_digital_id(catalog_id: str, expected: str) -> None:
     """Test the web code that looks up the digital id"""
-    service = MarvelService()
+    url = "https://www.marvel.com/comics/issue/72984"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == url
+
+        return httpx.Response(
+            200,
+            text='some page data "digitalComicID":"51975" more page data',
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+
+    service = MarvelService(client=client)
 
     if expected is NotImplementedError:
         with pytest.raises(NotImplementedError):

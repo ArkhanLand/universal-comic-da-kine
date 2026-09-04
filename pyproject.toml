@@ -30,6 +30,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/comic_downloader/cli.py" = ["B008"]
+"src/comic_downloader/services/marvel_unlimited.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
