@@ -1,3 +1,4 @@
+import httpx
 import re
 from urllib.parse import urlparse
 
@@ -6,6 +7,9 @@ from comic_downloader.services.base import ComicService
 
 
 class MarvelService(ComicService):
+    def __init__(self, client:httpx.Client | None = None) -> None:
+        self.client = client or httpx.Client()
+
     def matches_url(self, url: str) -> bool:
         parsed = urlparse(url)
 
@@ -27,3 +31,6 @@ class MarvelService(ComicService):
                 return f"{m.group(1)}"
             case _:
                 raise ValueError(f"Unable to parse comic_input: {comic_input}")
+
+    def get_digital_id(self, catalog_id: str) -> str:
+        raise NotImplementedError

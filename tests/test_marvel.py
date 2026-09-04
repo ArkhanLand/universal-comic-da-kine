@@ -43,3 +43,22 @@ def test_get_catalog_id(comic_input: str, expected: str) -> None:
             service.get_catalog_id(comic_input)
     else:
         assert service.get_catalog_id(comic_input) == expected
+
+@pytest.mark.parametrize(
+    ("catalog_id", "expected"),
+    [
+        ("72984", NotImplementedError),
+    ],
+    ids=[
+        "get_digital_id is not implemented yet"
+    ],
+)
+def test_get_digital_id(catalog_id: str, expected: str) -> None:
+    """Test the web code that looks up the digital id"""
+    service = MarvelService()
+
+    if expected is NotImplementedError:
+        with pytest.raises(NotImplementedError):
+            service.get_digital_id(catalog_id)
+    else:
+        assert service.get_digital_id(catalog_id) == expected
