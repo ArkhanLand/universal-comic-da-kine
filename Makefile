@@ -11,8 +11,14 @@ format-check:
 lint:
 	ruff check .
 
+lint-fix:
+	ruff check --fix .
+
 typecheck:
 	mypy src
 
 test:
-	pytest -v
+	pytest -v -m "not network"
+
+test-network:
+	pytest -v -m "network"

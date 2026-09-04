@@ -38,3 +38,6 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "network: tests that require access to live external services",
+]
