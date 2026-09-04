@@ -15,4 +15,4 @@ typecheck:
 	mypy src
 
 test:
-	pytest
+	pytest -v

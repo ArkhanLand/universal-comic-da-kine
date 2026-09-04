@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse
 
 from comic_downloader.models import Comic
@@ -17,3 +18,12 @@ class MarvelService(ComicService):
 
     def get_comic(self, url: str) -> Comic:
         raise NotImplementedError
+
+    def get_catalog_id(self, comic_input: str) -> str:
+        match comic_input:
+            # case _ if re.search(r"^[0-9]+$", comic_input):
+            #     return comic_input
+            case _ if m := re.search(r"/comics/issue/([0-9]+)(?:/.*)?$", comic_input):
+                return f"{m.group(1)}"
+            case _:
+                raise ValueError(f"Unable to parse comic_input: {comic_input}")
