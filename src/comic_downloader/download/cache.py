@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 class Cache:
     def __init__(self, root: Path) -> None:
         self.root = root

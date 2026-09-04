@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+
 from comic_downloader.models import Comic
+
 
 class ComicService(ABC):
     name: str

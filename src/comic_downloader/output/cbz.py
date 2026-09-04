@@ -4,6 +4,7 @@ from zipfile import ZIP_STORED, ZipFile
 from comic_downloader.models import Comic
 from comic_downloader.output.comicinfo import make_comicinfo
 
+
 def write_cbz(
     comic: Comic,
     pages: list[Path],

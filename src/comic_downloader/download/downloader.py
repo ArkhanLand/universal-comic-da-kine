@@ -1,10 +1,12 @@
 from pathlib import Path
 from urllib.parse import urlparse
+
 import httpx
 
 from comic_downloader.download.cache import Cache
 from comic_downloader.exceptions import DownloadError
 from comic_downloader.models import Comic, Page
+
 
 class Downloader:
     def __init__(self, client: httpx.Client, cache: Cache) -> None:

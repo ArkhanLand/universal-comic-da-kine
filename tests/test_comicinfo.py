@@ -1,6 +1,8 @@
 from datetime import date
+
 from comic_downloader.models import Comic, Creator
 from comic_downloader.output.comicinfo import make_comicinfo
+
 
 def test_comicinfo_contains_metadata() -> None:
     comic = Comic(

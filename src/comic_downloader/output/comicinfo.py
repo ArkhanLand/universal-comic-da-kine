@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+
 from comic_downloader.models import Comic
 
 ROLE_MAP = {
@@ -11,6 +12,7 @@ ROLE_MAP = {
     "editor": "Editor",
     "cover artist": "CoverArtist",
 }
+
 
 def make_comicinfo(comic: Comic) -> bytes:
     root = ET.Element("ComicInfo")
@@ -44,4 +46,9 @@ def make_comicinfo(comic: Comic) -> bytes:
         add(tag, ", ".join(names))
 
     ET.indent(root, space="  ")
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    xml: bytes = ET.tostring(
+        root,
+        encoding="utf-8",
+        xml_declaration=True,
+    )
+    return xml

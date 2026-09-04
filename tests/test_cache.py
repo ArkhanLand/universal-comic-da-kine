@@ -1,5 +1,7 @@
 from pathlib import Path
+
 from comic_downloader.download.cache import Cache
+
 
 def test_cache_complete_marker(tmp_path: Path) -> None:
     cache = Cache(tmp_path)
