@@ -1,8 +1,9 @@
+from typing import Any
+
 import httpx
 import pytest
 
 from comic_downloader.services.marvel_unlimited import MarvelService
-from pathlib import Path
 
 
 def test_matches_marvel_issue_url() -> None:
@@ -78,8 +79,60 @@ def test_get_digital_id(body: str, expected: str) -> None:
     else:
         assert service.get_digital_id(catalog_id) == expected
 
-@pytest.mark.network
-def test_marvel_live_digital_id() -> None:
-    service = MarvelService(cookie_file=Path("cookies.txt"))
 
-    assert service.get_digital_id("72984") == "51975"
+meta_body = {
+    "code": 200,
+    "status": "OK",
+    "data": {
+        "results": [
+            {
+                "id": 51975,
+                "issue_meta": {
+                    "id": 51975,
+                    "catalog_id": 72984,
+                    "title": "House Of X (2019) #1",
+                    "series_title": "House Of X (2019)",
+                    "release_date": "2019-07-24",
+                },
+            }
+        ]
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("digital_id", "expected"),
+    [
+        ("51975", meta_body),
+        ("no metadata here", ValueError),
+    ],
+    ids=[
+        "Metadata found",
+        "invalid digital_id",
+    ],
+)
+def test_get_metadata(digital_id: str, expected: dict[str, Any] | type[ValueError]) -> None:
+    """Test getting metadata"""
+
+    url = f"https://bifrost.marvel.com/v1/catalog/digital-comics/metadata/{digital_id}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == url
+        return httpx.Response(200, json=meta_body)
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+
+    service = MarvelService(client=client)
+
+    if expected is ValueError:
+        with pytest.raises(ValueError):
+            meta = service.get_metadata(digital_id)
+    else:
+        meta = service.get_metadata(digital_id)
+
+        assert meta["id"] == 51975, "Digital ID"
+        assert meta["catalog_id"] == 72984, "Catalog ID"
+        assert meta["title"] == "House Of X (2019) #1", "Title"
+        assert meta["series_title"] == "House Of X (2019)", "Series Title"
+        assert meta["release_date"] == "2019-07-24", "Release Date"
