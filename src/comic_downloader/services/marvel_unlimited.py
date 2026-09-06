@@ -67,7 +67,7 @@ class MarvelService(ComicService):
             source_url=BASE_URL + ISSUE_PATH.format(issue_data.catalog_id),
             series=meta["series_title"],
             issue_number=issue_data.issue_number,
-            series_service_id=issue_data.series_id,
+            service_series_id=issue_data.series_id,
             publication_date=date.fromisoformat(meta["release_date"]),
             publisher="Marvel",
             description=meta["description"],

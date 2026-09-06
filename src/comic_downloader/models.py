@@ -18,7 +18,7 @@ class Page:
 class Comic:
     service: str
     service_id: str
-    series_service_id: str
+    service_series_id: str
     title: str
 
     source_url: str | None = None
