@@ -55,11 +55,15 @@ ComicIssuebody = """
 <html>
 <script>
 window['__marvel-fitt__']={
-    "issueDetails": {
-        "id": "72984",
-        "digitalComicID": "51975",
-        "issue": 1,
-        "seriesId": 26338
+    "page": {
+        "content": {
+            "issueDetails": {
+                "id": "72984",
+                "digitalComicID": "51975",
+                "issue": 1,
+                "seriesId": 26338
+            }
+        }
     }
 };
 </script>

@@ -6,10 +6,15 @@ from comic_downloader.services.marvel_unlimited import MarvelService
 
 
 @pytest.mark.network
-def test_marvel_live_digital_id() -> None:
+def test_marvel_live_issue_data() -> None:
     service = MarvelService(cookie_file=Path("cookies.txt"))
 
-    assert service.get_digital_id("72984") == "51975"
+    meta = service.get_issue_data("72984")
+
+    assert meta.catalog_id == "72984", "Store Catalog ID"
+    assert meta.digital_id == "51975", "Store Service ID"
+    assert meta.issue_number == "1", "Issue Number"
+    assert meta.series_id == "26338", "Series ID"
 
 
 @pytest.mark.network

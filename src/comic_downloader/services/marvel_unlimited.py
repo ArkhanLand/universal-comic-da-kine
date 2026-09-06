@@ -119,7 +119,10 @@ class MarvelService(ComicService):
         decoder = json.JSONDecoder()
         page_data, _ = decoder.raw_decode(response.text[start:])
 
-        issue_data = page_data["issueDetails"]
+        try:
+            issue_data = page_data["page"]["content"]["issueDetails"]
+        except KeyError as exc:
+            raise ServiceResponseError("Marvel response did not contain issueDetails") from exc
 
         if issue_data["id"] != catalog_id:
             raise ServiceResponseError("Requested catalog ID does not match Marvel response")
