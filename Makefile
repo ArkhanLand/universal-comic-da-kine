@@ -2,23 +2,23 @@
 
 check: format-check lint typecheck test
 
-format:
-	ruff format .
-
 format-check:
 	ruff format --check .
 
 lint:
 	ruff check .
 
-lint-fix:
-	ruff check --fix .
-
 typecheck:
 	mypy src
 
 test:
 	pytest -v -m "not network"
+
+format:
+	ruff format .
+
+lint-fix:
+	ruff check --fix .
 
 test-network:
 	pytest -v -m "network"

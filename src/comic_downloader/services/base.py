@@ -11,5 +11,5 @@ class ComicService(ABC):
         """Return True if this service handles the URL."""
 
     @abstractmethod
-    def get_comic(self, url: str) -> Comic:
+    def get_comic(self, comic_input: str) -> Comic:
         """Return normalized metadata and page URLs."""

@@ -8,6 +8,7 @@ def test_comicinfo_contains_metadata() -> None:
     comic = Comic(
         service="example",
         service_id="1",
+        series_service_id="2",
         title="Example #1",
         series="Example",
         issue_number="1",

@@ -3,6 +3,7 @@ from typing import Any
 import httpx
 import pytest
 
+from comic_downloader.exceptions import InvalidComicInputError, ServiceResponseError
 from comic_downloader.services.marvel_unlimited import MarvelService
 
 
@@ -27,39 +28,57 @@ def test_matches_marvel_issue_url() -> None:
         ("https://marvel.com/comics/issue/72984/house_of_x_2019_1", "72984"),
         ("https://www.marvel.com/comics/issue/72984/", "72984"),
         ("https://www.marvel.com/comics/issue/72984", "72984"),
-        ("72984", ValueError),
+        ("72984", "72984"),
+        ("LOLWUT", InvalidComicInputError),
     ],
     ids=[
         "Full URL w/comic title",
         "Same as ^^^ without www",
         "Trailing slash only",
         "No trailing slash",
-        "ValueError",
+        "Bare catalog_id",
+        "Service Response Error",
     ],
 )
 def test_get_catalog_id(comic_input: str, expected: str) -> None:
     """Test that get_catalog_id returns correct values"""
     service = MarvelService()
 
-    if expected is ValueError:
-        with pytest.raises(ValueError):
+    if expected is InvalidComicInputError:
+        with pytest.raises(InvalidComicInputError):
             service.get_catalog_id(comic_input)
     else:
         assert service.get_catalog_id(comic_input) == expected
 
 
+ComicIssuebody = """
+<html>
+<script>
+window['__marvel-fitt__']={
+    "issueDetails": {
+        "id": "72984",
+        "digitalComicID": "51975",
+        "issue": 1,
+        "seriesId": 26338
+    }
+};
+</script>
+</html>
+"""
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
-        ('foo "digitalComicID":"51975" bar', "51975"),
-        ("no digital id here", ValueError),
+        (ComicIssuebody, "51975"),
+        ("no digital id here", ServiceResponseError),
     ],
     ids=[
         "digitalComicID found",
         "digitalComicID missing",
     ],
 )
-def test_get_digital_id(body: str, expected: str) -> None:
+def test_get_issue_data(body: str, expected: str) -> None:
     """Test the web code that looks up the digital id"""
     catalog_id = "72984"
     url = f"https://www.marvel.com/comics/issue/{catalog_id}"
@@ -73,11 +92,16 @@ def test_get_digital_id(body: str, expected: str) -> None:
 
     service = MarvelService(client=client)
 
-    if expected is ValueError:
-        with pytest.raises(ValueError):
-            service.get_digital_id(catalog_id)
+    if expected is ServiceResponseError:
+        with pytest.raises(ServiceResponseError):
+            service.get_issue_data(catalog_id)
     else:
-        assert service.get_digital_id(catalog_id) == expected
+        issue_data = service.get_issue_data(catalog_id)
+
+        assert issue_data.catalog_id == "72984"
+        assert issue_data.digital_id == "51975"
+        assert issue_data.issue_number == "1"
+        assert issue_data.series_id == "26338"
 
 
 meta_body = {
@@ -104,7 +128,7 @@ meta_body = {
     ("digital_id", "expected"),
     [
         ("51975", meta_body),
-        ("no metadata here", ValueError),
+        ("no metadata here", InvalidComicInputError),
     ],
     ids=[
         "Metadata found",
@@ -125,8 +149,8 @@ def test_get_metadata(digital_id: str, expected: dict[str, Any] | type[ValueErro
 
     service = MarvelService(client=client)
 
-    if expected is ValueError:
-        with pytest.raises(ValueError):
+    if expected is InvalidComicInputError:
+        with pytest.raises(InvalidComicInputError):
             meta = service.get_metadata(digital_id)
     else:
         meta = service.get_metadata(digital_id)
