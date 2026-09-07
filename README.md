@@ -1,48 +1,36 @@
-# comic-downloader
+# Universal Comic Da Kine
 
-A modular Python framework for downloading comics from supported services,
-caching source pages, and packaging them as CBZ files with `ComicInfo.xml`.
+Universal Comic Da Kine (UCD) is a toolkit for working with
+**comic-like files (CLFs)**: publications whose primary content consists
+of images representing pages.
 
-This initial commit intentionally contains no service-specific implementation.
-Service adapters are isolated from downloading, caching, and output generation.
+UCD aims to provide a format-independent model for ingesting,
+manipulating, and exporting comic-style publications.
 
-## Development
+## Goals
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
+UCD should be able to:
 
-ruff check .
-ruff format --check .
-mypy src
-pytest
-```
+- Read CBZ, PDF, EPUB, image directories, and other image-page formats.
+- Acquire publications from supported online reader services.
+- Normalize these sources into a common internal CLF representation.
+- Inspect and edit publication metadata.
+- Reorder, insert, remove, or truncate pages.
+- Crop, rotate, resize, optimize, or otherwise process page images.
+- Split and combine publications.
+- Export the resulting publication to supported formats such as CBZ,
+  PDF, EPUB, or image sets.
 
 ## Architecture
 
-```text
-URL
- |
- v
-Service adapter
- |
- v
-Comic + Page models
- |
- +--> Downloader --> persistent page cache
- |
- +--> ComicInfo.xml
- |
- v
-CBZ writer
-```
+UCD treats file formats and online services as adapters around a common
+Comic-Like File model:
 
-A provider implementation derives from `ComicService`, resolves a URL, and
-normalizes provider-specific data into the shared `Comic` and `Page` models.
-It should not write files or build archives.
+    Input Adapter -> CLF -> Transformations -> Output Adapter
 
-Cache keys are `service/service_id`. Archive overwrite and source-page
-redownload are deliberately separate operations.
+This keeps format- and service-specific code separate from the core
+publication-processing logic.
 
-Status: project skeleton only; no remote service is implemented yet.
+## Status
+
+Early development.
