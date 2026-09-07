@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 
-from comic_downloader.models import Comic
+from comic_downloader.models import CLF
 
 
-class ComicService(ABC):
+class CLFService(ABC):
     name: str
 
     @abstractmethod
@@ -11,5 +11,5 @@ class ComicService(ABC):
         """Return True if this service handles the URL."""
 
     @abstractmethod
-    def get_comic(self, comic_input: str) -> Comic:
+    def get_clf(self, source: str) -> CLF:
         """Return normalized metadata and page URLs."""

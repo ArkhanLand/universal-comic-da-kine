@@ -14,8 +14,9 @@ class Page:
     url: str
 
 
+# Comic-Like File. The internal UCD representation of the entire publication, including metadata
 @dataclass(frozen=True, slots=True)
-class Comic:
+class CLF:
     service: str
     service_id: str
     service_series_id: str
@@ -42,7 +43,7 @@ class Comic:
     genres: tuple[str, ...] = field(default_factory=tuple)
     tags: tuple[str, ...] = field(default_factory=tuple)
 
-    # Comic-specific descriptive metadata
+    # Optional comic-specific descriptive metadata
     story_arcs: tuple[str, ...] = field(default_factory=tuple)
     characters: tuple[str, ...] = field(default_factory=tuple)
     teams: tuple[str, ...] = field(default_factory=tuple)

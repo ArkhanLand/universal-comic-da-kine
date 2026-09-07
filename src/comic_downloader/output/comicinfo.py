@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 
-from comic_downloader.models import Comic
+from comic_downloader.models import CLF
 
 ROLE_MAP = {
     "writer": "Writer",
@@ -14,28 +14,30 @@ ROLE_MAP = {
 }
 
 
-def make_comicinfo(comic: Comic) -> bytes:
+# Makes the XML structure "ComicInfo.xml", as defined in the CBZ standard
+# Returns a bytes object with the output from xml.etree.ElementTree.tostring()
+def make_comicinfo(clf: CLF) -> bytes:
     root = ET.Element("ComicInfo")
 
     def add(tag: str, value: object | None) -> None:
         if value is not None and str(value).strip():
             ET.SubElement(root, tag).text = str(value)
 
-    add("Title", comic.title)
-    add("Series", comic.series)
-    add("Number", comic.issue_number)
-    add("Summary", comic.description)
-    add("Publisher", comic.publisher)
-    add("Imprint", comic.imprint)
-    add("AgeRating", comic.age_rating)
+    add("Title", clf.title)
+    add("Series", clf.series)
+    add("Number", clf.issue_number)
+    add("Summary", clf.description)
+    add("Publisher", clf.publisher)
+    add("Imprint", clf.imprint)
+    add("AgeRating", clf.age_rating)
 
-    if comic.publication_date:
-        add("Year", comic.publication_date.year)
-        add("Month", comic.publication_date.month)
-        add("Day", comic.publication_date.day)
+    if clf.publication_date:
+        add("Year", clf.publication_date.year)
+        add("Month", clf.publication_date.month)
+        add("Day", clf.publication_date.day)
 
     grouped: dict[str, list[str]] = {}
-    for creator in comic.creators:
+    for creator in clf.creators:
         tag = ROLE_MAP.get(creator.role.casefold())
         if tag:
             names = grouped.setdefault(tag, [])

@@ -5,7 +5,7 @@ import httpx
 
 from comic_downloader.download.cache import Cache
 from comic_downloader.exceptions import DownloadError
-from comic_downloader.models import Comic, Page
+from comic_downloader.models import CLF, Page
 
 
 class Downloader:
@@ -13,10 +13,10 @@ class Downloader:
         self.client = client
         self.cache = cache
 
-    def download(self, comic: Comic, *, redownload: bool = False) -> list[Path]:
-        pages_dir = self.cache.prepare(comic.service, comic.service_id)
+    def download(self, clf: CLF, *, redownload: bool = False) -> list[Path]:
+        pages_dir = self.cache.prepare(clf.service, clf.service_id)
 
-        if self.cache.is_complete(comic.service, comic.service_id) and not redownload:
+        if self.cache.is_complete(clf.service, clf.service_id) and not redownload:
             return self._cached_pages(pages_dir)
 
         if redownload:
@@ -24,10 +24,10 @@ class Downloader:
                 if path.is_file():
                     path.unlink()
 
-        for page in comic.pages:
+        for page in clf.pages:
             self._download_page(page, pages_dir)
 
-        self.cache.mark_complete(comic.service, comic.service_id)
+        self.cache.mark_complete(clf.service, clf.service_id)
         return self._cached_pages(pages_dir)
 
     def _download_page(self, page: Page, pages_dir: Path) -> Path:

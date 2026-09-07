@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 import httpx
 
 from comic_downloader.exceptions import InvalidComicInputError, ServiceResponseError
-from comic_downloader.models import Comic, Creator
-from comic_downloader.services.base import ComicService
+from comic_downloader.models import CLF, Creator
+from comic_downloader.services.base import CLFService
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -33,7 +33,7 @@ class _MarvelIssueData:
     series_id: str
 
 
-class MarvelService(ComicService):
+class MarvelService(CLFService):
     def __init__(
         self,
         client: httpx.Client | None = None,
@@ -55,12 +55,12 @@ class MarvelService(ComicService):
             follow_redirects=True,
         )
 
-    def _metadata_to_comic(
+    def _metadata_to_clf(
         self,
         issue_data: _MarvelIssueData,
         meta: dict[str, Any],
-    ) -> Comic:
-        return Comic(
+    ) -> CLF:
+        return CLF(
             service="marvelUnlimited",
             service_id=issue_data.digital_id,
             title=meta["title"],
@@ -93,14 +93,14 @@ class MarvelService(ComicService):
         )
         # fmt: on
 
-    def get_catalog_id(self, comic_input: str) -> str:
-        match comic_input:
-            case _ if comic_input.isdigit():
-                return comic_input
-            case _ if m := re.search(r"/comics/issue/([0-9]+)(?:/.*)?$", comic_input):
+    def get_catalog_id(self, source: str) -> str:
+        match source:
+            case _ if source.isdigit():
+                return source
+            case _ if m := re.search(r"/comics/issue/([0-9]+)(?:/.*)?$", source):
                 return f"{m.group(1)}"
             case _:
-                raise InvalidComicInputError(f"Unable to parse comic_input: {comic_input}")
+                raise InvalidComicInputError(f"Unable to parse source: {source}")
 
     def get_issue_data(self, catalog_id: str) -> _MarvelIssueData:
         issue_url = BASE_URL + ISSUE_PATH.format(catalog_id=catalog_id)
@@ -143,18 +143,18 @@ class MarvelService(ComicService):
         response.raise_for_status()
         data: dict[str, Any] = response.json()
 
-        # Marvel-specific data. This needs to be turned into a Comic():
+        # Marvel-specific data. This needs to be turned into a CLF():
         meta: dict[str, Any] = data["data"]["results"][0]["issue_meta"]
 
         return meta
 
-    def get_comic(self, comic_input: str) -> Comic:
-        if not (self.matches_url(comic_input) or comic_input.isdigit()):
-            raise InvalidComicInputError(f"Invalid Marvel comic input: {comic_input}")
+    def get_clf(self, source: str) -> CLF:
+        if not (self.matches_url(source) or source.isdigit()):
+            raise InvalidComicInputError(f"Invalid Marvel comic input: {source}")
 
-        catalog_id = self.get_catalog_id(comic_input)
+        catalog_id = self.get_catalog_id(source)
         issue_data = self.get_issue_data(catalog_id)
         digital_id = issue_data.digital_id
         metadata = self.get_metadata(digital_id)
 
-        return self._metadata_to_comic(issue_data, metadata)
+        return self._metadata_to_clf(issue_data, metadata)
