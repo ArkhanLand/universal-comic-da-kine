@@ -1,7 +1,7 @@
 from datetime import date
 
-from comic_downloader.models import CLF, Creator
-from comic_downloader.output.comicinfo import make_comicinfo
+from ucd.models import CLF, Creator
+from ucd.output.comicinfo import make_comicinfo
 
 
 def test_comicinfo_contains_metadata() -> None:

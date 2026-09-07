@@ -9,9 +9,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from comic_downloader.exceptions import InvalidComicInputError, ServiceResponseError
-from comic_downloader.models import CLF, Creator
-from comic_downloader.services.base import CLFService
+from ucd.exceptions import InvalidComicInputError, ServiceResponseError
+from ucd.models import CLF, Creator
+from ucd.services.base import CLFService
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "

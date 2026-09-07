@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from comic_downloader.models import CLF
+from ucd.models import CLF
 
 
 class CLFService(ABC):

@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 
-from comic_downloader.models import CLF
+from ucd.models import CLF
 
 ROLE_MAP = {
     "writer": "Writer",

@@ -12,7 +12,7 @@ def download(
     overwrite: bool = typer.Option(False, "--overwrite", "-o"),
     kill_cache: bool = typer.Option(False, "--kill-cache", "-k"),
 ) -> None:
-    """Download and package a comic from a supported service."""
+    """Acquire and package a comic-like publication."""
     typer.echo(f"URL: {url}")
     typer.echo(f"Output directory: {output}")
     typer.echo(f"Overwrite archive: {overwrite}")

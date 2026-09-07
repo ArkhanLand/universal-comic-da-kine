@@ -3,8 +3,8 @@ from typing import Any
 import httpx
 import pytest
 
-from comic_downloader.exceptions import InvalidComicInputError, ServiceResponseError
-from comic_downloader.services.marvel_unlimited import MarvelService
+from ucd.exceptions import InvalidComicInputError, ServiceResponseError
+from ucd.services.marvel_unlimited import MarvelService
 
 
 def test_matches_marvel_issue_url() -> None:

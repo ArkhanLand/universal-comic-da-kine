@@ -1,8 +1,8 @@
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
-from comic_downloader.models import CLF
-from comic_downloader.output.comicinfo import make_comicinfo
+from ucd.models import CLF
+from ucd.output.comicinfo import make_comicinfo
 
 
 def write_cbz(

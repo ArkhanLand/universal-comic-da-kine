@@ -3,9 +3,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from comic_downloader.download.cache import Cache
-from comic_downloader.exceptions import DownloadError
-from comic_downloader.models import CLF, Page
+from ucd.download.cache import Cache
+from ucd.exceptions import DownloadError
+from ucd.models import CLF, Page
 
 
 class Downloader:
