@@ -12,7 +12,9 @@ Input Adapter -> Persistent normalized CLF -> Transformations -> Output Adapter
 
 An input adapter owns all source-specific acquisition work. Once it returns a CLF, downstream code must not need to know whether the publication came from Marvel Unlimited, a CBZ archive, PDF, EPUB, an image directory, or another source.
 
-A returned CLF is complete and immediately usable for inspection, transformation, or export. For an online source, this means that all page images have already been acquired and stored as persistent UCD objects before the adapter returns.
+A returned CLF is complete and immediately usable for inspection, transformation, or export. For an online source, this means that all page images have already been acquired or derived and stored as persistent UCD objects before the adapter returns.
+
+Normalization does not require discarding the exact source container. When a source arrives as a meaningful publication artifact such as a PDF, EPUB, CBZ, ZIP, or other container, UCD may preserve that exact byte stream as immutable provenance in addition to the normalized page objects.
 
 ## Publication identity and revisions
 
@@ -132,6 +134,35 @@ class ImageReference:
 
 The persistent object store resolves `object_id` to the physical file. Source filenames, archive member names, URLs, and storage paths are not part of the normalized CLF model.
 
+## Immutable source artifacts
+
+UCD may also preserve the exact publication-level artifact from which normalized pages were acquired or derived. Examples include a publisher-delivered PDF, EPUB, CBZ, downloaded ZIP, or other source container.
+
+A source artifact is an immutable byte stream identified by the SHA-256 hash of its exact bytes, using the same content-addressed principle as image objects:
+
+```text
+Source Artifact ID = SHA-256(exact source bytes)
+```
+
+Source artifacts are provenance, not pages. They do not replace normalization and are not exposed to output adapters as a substitute for the CLF. `get_clf()` must still return a complete normalized publication whose pages are persistent image objects.
+
+Preserving a source artifact is especially valuable when normalization necessarily derives page images from a richer container. A PDF page, for example, may be a composition of raster images, vector graphics, live text, masks, transparency, optional-content groups, annotations, and other PDF objects. UCD should retain the exact PDF while separately recording how normalized page images were rendered from it.
+
+Conceptually:
+
+```text
+immutable source artifact
+        |
+        | normalization policy
+        v
+normalized image objects
+        |
+        v
+immutable CLF revision
+```
+
+A publication may therefore retain both exact source provenance and one or more normalized derivations without conflating the two.
+
 ## Persistent UCD store
 
 UCD maintains durable storage across command invocations. Once a publication is imported, it remains managed by UCD until explicitly deleted.
@@ -141,14 +172,16 @@ Conceptually:
 ```text
 UCD store/
 ├── objects/
-│   └── immutable content-addressed image objects
+│   └── immutable content-addressed objects
+│       ├── image objects
+│       └── source artifacts
 └── publications/
     └── publication records and immutable revision manifests
 ```
 
 The exact physical layout is an implementation detail and may evolve. The storage root should eventually be configurable, with an OS-appropriate default.
 
-This store is more than a disposable cache: it is UCD's authoritative local representation of imported publications and their image resources.
+This store is more than a disposable cache: it is UCD's authoritative local representation of imported publications, their image resources, and retained source artifacts.
 
 ## Original and transformed images
 
@@ -210,15 +243,110 @@ For an online reader service, the adapter may internally:
 
 1. identify the publication;
 2. fetch source metadata;
-3. discover transient page resources;
-4. download each image byte stream;
-5. inspect the image;
-6. hash and persist the immutable image object;
-7. construct `Page` objects;
-8. construct and persist the initial CLF revision;
-9. return the complete normalized CLF.
+3. discover transient page resources or a source publication artifact;
+4. download the source bytes;
+5. preserve a meaningful source artifact when appropriate;
+6. acquire or derive normalized page images according to the adapter's normalization policy;
+7. inspect, hash, and persist each immutable image object;
+8. construct `Page` objects;
+9. construct and persist the initial CLF revision;
+10. return the complete normalized CLF.
 
 Transient acquisition details do not need to survive normalization. A stable publication URL may be retained as provenance, but service-specific transient page URLs or internal acquisition identifiers should not be required by downstream code.
+
+Normalization parameters that materially affect the resulting CLF should survive as provenance. This allows the exact source artifact plus the recorded normalization policy to explain how a particular initial CLF revision was derived.
+
+## PDF input normalization
+
+PDF deserves an explicit normalization policy because a PDF page is a rendering program rather than necessarily a single raster image. Embedded images are page components and must not generally be treated as page images merely because they can be extracted from the PDF.
+
+The default PDF input path is therefore:
+
+```text
+PDF source
+    |
+    +--> preserve exact PDF as immutable source artifact
+    |
+    v
+PDF renderer + normalization policy
+    |
+    v
+one persistent raster image per logical page
+    |
+    v
+normalized CLF
+```
+
+The PDF adapter may accept PDF-specific import options while preserving the strong `get_clf()` contract. Conceptually:
+
+```python
+get_clf(
+    source,
+    options=PDFInputOptions(
+        render_dpi=300,
+        color_mode="preserve",
+        alpha="preserve",
+        annotations="exclude",
+        page_box="media",
+    ),
+)
+```
+
+These field names and defaults are illustrative rather than final API commitments. The durable requirement is that PDF normalization policy be explicit enough to reproduce and explain the derived page images.
+
+Potential PDF-specific policy includes:
+
+- render resolution;
+- MediaBox, CropBox, TrimBox, or other page-box selection;
+- ICC profile and color-space handling;
+- transparency and alpha handling;
+- whether annotations are rendered;
+- optional-content-group/layer visibility;
+- overprint behavior;
+- interactive form appearance;
+- preservation of an existing text or OCR layer as auxiliary metadata.
+
+Rendering parameters are provenance because different valid policies can produce different normalized CLFs from the same immutable PDF source artifact. For example:
+
+```text
+source artifact SHA-256 = X
+        |
+        +-- PDF normalization @ 150 dpi --> CLF revision A
+        |
+        +-- PDF normalization @ 300 dpi --> CLF revision B
+```
+
+Neither derivation changes the source PDF. Each resulting image is an ordinary immutable UCD image object, and each normalized state is represented by an immutable CLF revision.
+
+A future implementation may optimize special cases where a PDF page is provably equivalent to a single embedded raster image, but such optimization must preserve page rendering semantics and must not make embedded-image extraction the general PDF normalization strategy.
+
+## Warhammer Vault as a PDF source adapter
+
+Warhammer Vault is a concrete example of why acquisition and normalization should remain separate concerns. The authenticated web application currently delivers a publisher-provided PDF through a temporary signed object URL and then renders that PDF in the browser.
+
+For UCD, the appropriate source path is therefore:
+
+```text
+Warhammer Vault publication URL
+        |
+        v
+authenticated Vault acquisition
+        |
+        v
+publisher-delivered PDF
+        |
+        +--> immutable source artifact
+        |
+        v
+generic PDF input normalization
+        |
+        v
+normalized CLF
+```
+
+The Vault adapter should own Vault-specific authentication, publication discovery, metadata acquisition, and retrieval of a fresh authorized PDF URL. Once the PDF has been acquired and persisted, generic PDF normalization should take over. The adapter should not scrape browser-rendered page images when the publisher-provided PDF is available as the actual upstream source asset.
+
+This differs from services whose upstream representation is genuinely a sequence of page assets. In those cases the source adapter should normalize those page assets directly rather than manufacturing an intermediate PDF.
 
 ## Output adapter contract
 
@@ -248,6 +376,8 @@ Persistent structures must carry explicit schema versions. The exact representat
 }
 ```
 
+Publication provenance should also be able to identify retained source artifacts and normalization parameters without requiring downstream consumers to understand the originating service.
+
 Serialization and deserialization should be explicit rather than treating Python dataclass serialization as the storage format. This allows the Python object model to evolve independently of persisted UCD data and provides a clean path for future migrations.
 
 ## Files are authoritative
@@ -272,3 +402,7 @@ The core invariants are:
 10. Input-specific acquisition details do not leak into downstream processing.
 11. Imported image encoding is preserved unless an explicit transformation or output requirement changes it.
 12. Transformations never destroy the original image object.
+13. Meaningful source publication artifacts may be preserved byte-for-byte as immutable content-addressed provenance.
+14. Source artifacts do not substitute for normalization; `get_clf()` still returns a complete persistent normalized CLF.
+15. Normalization parameters that materially affect derived page images are recorded as provenance.
+16. PDF pages are normalized according to rendering semantics, not by assuming embedded images are pages.
