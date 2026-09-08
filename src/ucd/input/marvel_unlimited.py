@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 import httpx
 
 from ucd.exceptions import InvalidComicInputError, ServiceResponseError
+from ucd.input.base import InputAdapter
 from ucd.models import CLF, Creator
-from ucd.services.base import CLFService
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -33,7 +33,7 @@ class _MarvelIssueData:
     series_id: str
 
 
-class MarvelService(CLFService):
+class MarvelService(InputAdapter):
     def __init__(
         self,
         client: httpx.Client | None = None,

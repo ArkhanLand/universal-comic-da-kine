@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ucd.services.marvel_unlimited import MarvelService
+from ucd.input.marvel_unlimited import MarvelService
 
 
 @pytest.mark.network

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from ucd.models import CLF
 
 
-class CLFService(ABC):
+class InputAdapter(ABC):
     name: str
 
     @abstractmethod
