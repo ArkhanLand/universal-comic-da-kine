@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from ucd.input.marvel_unlimited import MarvelService
+from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 
 
 @pytest.mark.network
 def test_marvel_live_issue_data() -> None:
-    service = MarvelService(cookie_file=Path("cookies.txt"))
+    service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
     meta = service.get_issue_data("72984")
 
@@ -20,7 +20,7 @@ def test_marvel_live_issue_data() -> None:
 @pytest.mark.network
 def test_marvel_live_metadata() -> None:
     """Test the web code that looks up live Marvel data"""
-    service = MarvelService(cookie_file=Path("cookies.txt"))
+    service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
     meta = service.get_metadata("51975")
 

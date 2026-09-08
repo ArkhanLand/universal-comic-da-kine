@@ -33,7 +33,7 @@ class _MarvelIssueData:
     series_id: str
 
 
-class MarvelService(InputAdapter):
+class MarvelUnlimitedAdapter(InputAdapter):
     def __init__(
         self,
         client: httpx.Client | None = None,

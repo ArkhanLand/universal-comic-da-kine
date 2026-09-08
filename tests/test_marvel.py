@@ -4,12 +4,12 @@ import httpx
 import pytest
 
 from ucd.exceptions import InvalidComicInputError, ServiceResponseError
-from ucd.input.marvel_unlimited import MarvelService
+from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 
 
 def test_matches_marvel_issue_url() -> None:
     """Test that my matches_url code is working"""
-    service = MarvelService()
+    service = MarvelUnlimitedAdapter()
 
     assert service.matches_url("https://www.marvel.com/comics/issue/72984/house_of_x_2019_1")
     assert service.matches_url("https://marvel.com/comics/issue/49123")
@@ -42,7 +42,7 @@ def test_matches_marvel_issue_url() -> None:
 )
 def test_get_catalog_id(comic_input: str, expected: str) -> None:
     """Test that get_catalog_id returns correct values"""
-    service = MarvelService()
+    service = MarvelUnlimitedAdapter()
 
     if expected is InvalidComicInputError:
         with pytest.raises(InvalidComicInputError):
@@ -94,7 +94,7 @@ def test_get_issue_data(body: str, expected: str) -> None:
     transport = httpx.MockTransport(handler)
     client = httpx.Client(transport=transport)
 
-    service = MarvelService(client=client)
+    service = MarvelUnlimitedAdapter(client=client)
 
     if expected is ServiceResponseError:
         with pytest.raises(ServiceResponseError):
@@ -151,7 +151,7 @@ def test_get_metadata(digital_id: str, expected: dict[str, Any] | type[ValueErro
     transport = httpx.MockTransport(handler)
     client = httpx.Client(transport=transport)
 
-    service = MarvelService(client=client)
+    service = MarvelUnlimitedAdapter(client=client)
 
     if expected is InvalidComicInputError:
         with pytest.raises(InvalidComicInputError):
