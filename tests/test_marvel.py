@@ -1,4 +1,6 @@
+from datetime import date
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -10,7 +12,13 @@ from ucd.exceptions import (
     InvalidComicInputError,
     ServiceResponseError,
 )
-from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter, _MarvelPageSource, _MarvelPageSources
+from ucd.input.marvel_unlimited import (
+    MarvelUnlimitedAdapter,
+    _MarvelIssueData,
+    _MarvelPageSource,
+    _MarvelPageSources,
+)
+from ucd.models import Creator, Page, Pages
 
 
 def test_matches_marvel_issue_url() -> None:
@@ -373,3 +381,125 @@ def test_get_pages(tmp_path, monkeypatch):
     assert pages.pages[1].content_type == "image/jpeg"
     assert pages.pages[1].mode == "RGB"
     assert pages.pages[1].path.exists()
+
+
+def test_get_clf(monkeypatch):
+    adapter = MarvelUnlimitedAdapter(client=httpx.Client())
+
+    issue_data = _MarvelIssueData(
+        catalog_id="72984",
+        digital_id="51975",
+        series_id="26338",
+        issue_number="1",
+    )
+
+    metadata = {
+        "title": "House of X (2019) #1",
+        "series_title": "House of X (2019)",
+        "release_date": "2019-07-24",
+        "description": "Test description",
+        "rating": "Rated T+",
+        "imprint": None,
+        "thumbnail": {
+            "path": "https://example.com/thumbnail",
+            "extension": "jpg",
+        },
+        "creators": {
+            "extended_list": [
+                {
+                    "full_name": "Jonathan Hickman",
+                    "role": "writer",
+                },
+                {
+                    "full_name": "Pepe Larraz",
+                    "role": "penciler",
+                },
+            ]
+        },
+    }
+
+    page_sources = _MarvelPageSources(
+        cover=_MarvelPageSource(
+            number=None,
+            url="https://example.com/cover.jpg",
+        ),
+        pages=[
+            _MarvelPageSource(
+                number=1,
+                url="https://example.com/page1.jpg",
+            ),
+        ],
+    )
+
+    pages = Pages(
+        cover=Page(
+            number=None,
+            path=Path("/tmp/cover.jpg"),
+            width=1000,
+            height=1500,
+            content_type="image/jpeg",
+            mode="RGB",
+        ),
+        pages=(
+            Page(
+                number=1,
+                path=Path("/tmp/page1.jpg"),
+                width=1000,
+                height=1500,
+                content_type="image/jpeg",
+                mode="RGB",
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        adapter,
+        "get_catalog_id",
+        lambda source: "72984",
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_issue_data",
+        lambda catalog_id: issue_data,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_metadata",
+        lambda digital_id: metadata,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_page_sources",
+        lambda digital_id: page_sources,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_pages",
+        lambda digital_id, sources: pages,
+    )
+
+    clf = adapter.get_clf("https://www.marvel.com/comics/issue/72984")
+
+    assert clf.service == "marvelUnlimited"
+    assert clf.service_id == "51975"
+    assert clf.title == "House of X (2019) #1"
+    assert clf.source_url == "https://www.marvel.com/comics/issue/72984"
+    assert clf.series == "House of X (2019)"
+    assert clf.issue_number == "1"
+    assert clf.service_series_id == "26338"
+    assert clf.publication_date == date(2019, 7, 24)
+    assert clf.publisher == "Marvel"
+    assert clf.description == "Test description"
+    assert clf.age_rating == "Rated T+"
+    assert clf.imprint is None
+    assert clf.thumbnail_url == "https://example.com/thumbnail.jpg"
+
+    assert clf.creators == (
+        Creator(name="Jonathan Hickman", role="writer"),
+        Creator(name="Pepe Larraz", role="penciler"),
+    )
+
+    assert clf.pages is pages
+    assert clf.pages.cover.number is None
+    assert len(clf.pages.pages) == 1
+    assert clf.pages.pages[0].number == 1

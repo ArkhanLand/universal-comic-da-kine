@@ -1,6 +1,7 @@
 from datetime import date
+from pathlib import Path
 
-from ucd.models import CLF, Creator
+from ucd.models import CLF, Creator, Page, Pages
 from ucd.output.comicinfo import make_comicinfo
 
 
@@ -14,6 +15,17 @@ def test_comicinfo_contains_metadata() -> None:
         issue_number="1",
         publication_date=date(2026, 9, 3),
         creators=(Creator("Jane Writer", "writer"),),
+        pages=Pages(
+            cover=Page(
+                number=None,
+                path=Path("/tmp/cover.jpg"),
+                width=100,
+                height=150,
+                content_type="image/jpeg",
+                mode="RGB",
+            ),
+            pages=(),
+        ),
     )
     xml = make_comicinfo(clf).decode()
     assert "<Title>Example #1</Title>" in xml

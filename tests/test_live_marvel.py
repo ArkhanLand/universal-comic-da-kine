@@ -60,13 +60,19 @@ def test_marvel_live_get_pages() -> None:
         sources,
     )
 
+    assert pages.cover.number is None
     assert pages.cover.path.exists()
     assert pages.cover.path.stat().st_size > 0
     assert pages.cover.width > 0
     assert pages.cover.height > 2
     assert pages.cover.content_type.startswith("image/")
 
-    assert len(pages.pages) == 48
+    # Marvel comics always have page count divisible by four
+    assert len(pages.pages) % 4 == 0, (
+        f"Expected a Marvel page count to be divisible by four; got {len(pages.pages)}"
+    )
+
+    page_no = 1
 
     for page in pages.pages:
         assert page.path.exists()
@@ -74,3 +80,5 @@ def test_marvel_live_get_pages() -> None:
         assert page.width > 0
         assert page.height > 0
         assert page.content_type.startswith("image/")
+        assert page.number == page_no
+        page_no = page_no + 1

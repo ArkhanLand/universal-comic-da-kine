@@ -42,6 +42,9 @@ class CLF:
     service_series_id: str
     title: str
 
+    # Downloadable content
+    pages: Pages
+
     source_url: str | None = None
 
     # Basic bibliographic metadata
@@ -71,6 +74,3 @@ class CLF:
 
     # Credits
     creators: tuple[Creator, ...] = field(default_factory=tuple)
-
-    # Downloadable content
-    pages: tuple[Page, ...] = field(default_factory=tuple)

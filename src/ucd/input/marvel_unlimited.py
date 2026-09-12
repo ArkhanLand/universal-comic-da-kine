@@ -81,32 +81,34 @@ class MarvelUnlimitedAdapter(InputAdapter):
             follow_redirects=True,
         )
 
-    def _metadata_to_clf(
+    def _build_clf(
         self,
         issue_data: _MarvelIssueData,
-        meta: dict[str, Any],
+        metadata: dict[str, Any],
+        pages: Pages,
     ) -> CLF:
         return CLF(
             service="marvelUnlimited",
             service_id=issue_data.digital_id,
-            title=meta["title"],
+            title=metadata["title"],
             source_url=BASE_URL + ISSUE_PATH + f"/{issue_data.catalog_id}",
-            series=meta["series_title"],
+            series=metadata["series_title"],
             issue_number=issue_data.issue_number,
             service_series_id=issue_data.series_id,
-            publication_date=date.fromisoformat(meta["release_date"]),
+            publication_date=date.fromisoformat(metadata["release_date"]),
             publisher="Marvel",
-            description=meta["description"],
-            age_rating=meta["rating"],
-            imprint=meta["imprint"],
-            thumbnail_url=f"{meta['thumbnail']['path']}.{meta['thumbnail']['extension']}",
+            description=metadata["description"],
+            age_rating=metadata["rating"],
+            imprint=metadata["imprint"],
+            thumbnail_url=f"{metadata['thumbnail']['path']}.{metadata['thumbnail']['extension']}",
             creators=tuple(
                 Creator(
                     name=creator["full_name"],
                     role=creator["role"],
                 )
-                for creator in meta["creators"]["extended_list"]
+                for creator in metadata["creators"]["extended_list"]
             ),
+            pages=pages,
         )
 
     def matches_url(self, url: str) -> bool:
@@ -151,7 +153,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             raise ServiceResponseError("Marvel response did not contain issueDetails") from exc
 
         if issue_data["id"] != catalog_id:
-            raise ServiceResponseError("Requested catalog ID does not match Marvel response")
+            raise ServiceResponseError("Requested Catalog ID does not match Marvel response")
 
         return _MarvelIssueData(
             catalog_id=str(issue_data["id"]),
@@ -302,16 +304,18 @@ class MarvelUnlimitedAdapter(InputAdapter):
             shutil.rmtree(path, ignore_errors=True)
 
     def get_clf(self, source: str) -> CLF:
-        raise NotImplementedError
-
         if not (self.matches_url(source) or source.isdigit()):
             raise InvalidComicInputError(f"Invalid Marvel comic input: {source}")
 
         catalog_id = self.get_catalog_id(source)
         issue_data = self.get_issue_data(catalog_id)
 
-        if issue_data:
-            ...
+        metadata = self.get_metadata(issue_data.digital_id)
+        page_sources = self.get_page_sources(issue_data.digital_id)
+        pages = self.get_pages(issue_data.digital_id, page_sources)
 
-
-#        return CLF(...)
+        return self._build_clf(
+            issue_data=issue_data,
+            metadata=metadata,
+            pages=pages,
+        )
