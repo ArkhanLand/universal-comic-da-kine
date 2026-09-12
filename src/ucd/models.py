@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -10,8 +11,27 @@ class Creator:
 
 @dataclass(frozen=True, slots=True)
 class Page:
-    number: int
-    url: str
+    number: int | None
+    path: Path
+    width: int
+    height: int
+    content_type: str
+    mode: str
+
+
+@dataclass(frozen=True, slots=True)
+class Pages:
+    cover: Page
+    pages: tuple[Page, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadedImageFile:
+    filename: Path
+    width: int
+    height: int
+    content_type: str
+    mode: str
 
 
 # Comic-Like File. The internal UCD representation of the entire publication, including metadata

@@ -1,17 +1,26 @@
+import hashlib
 import json
+import mimetypes
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import date
 from http.cookiejar import MozillaCookieJar
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from PIL import Image
 
-from ucd.exceptions import InvalidComicInputError, ServiceResponseError
+from ucd.exceptions import (
+    IneligibleError,
+    InvalidComicInputError,
+    ServiceResponseError,
+)
 from ucd.input.base import InputAdapter
-from ucd.models import CLF, Creator
+from ucd.models import CLF, Creator, DownloadedImageFile, Page, Pages
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -21,8 +30,11 @@ USER_AGENT = (
 
 BASE_URL = "https://www.marvel.com"
 BIFROST_BASE_URL = "https://bifrost.marvel.com"
-ISSUE_PATH = "/comics/issue/{catalog_id}"
-METADATA_PATH = "/v1/catalog/digital-comics/metadata/{digital_id}"
+ISSUE_PATH = "/comics/issue"
+COMICS_PATH = "/v1/catalog/digital-comics"
+METADATA_PATH = f"{COMICS_PATH}/metadata"
+ASSETS_PATH = f"{COMICS_PATH}/assets"
+WORK_PATH = "/tmp/ucd/marvel"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +45,26 @@ class _MarvelIssueData:
     series_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class _MarvelPageSource:
+    number: int | None
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class _MarvelPageSources:
+    cover: _MarvelPageSource
+    pages: list[_MarvelPageSource]
+
+
 class MarvelUnlimitedAdapter(InputAdapter):
     def __init__(
         self,
         client: httpx.Client | None = None,
         cookie_file: Path | None = None,
     ) -> None:
+        self.work_dirs: list[Path] = []
+
         if client is not None:
             self.client = client
             return
@@ -64,7 +90,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             service="marvelUnlimited",
             service_id=issue_data.digital_id,
             title=meta["title"],
-            source_url=BASE_URL + ISSUE_PATH.format(issue_data.catalog_id),
+            source_url=BASE_URL + ISSUE_PATH + f"/{issue_data.catalog_id}",
             series=meta["series_title"],
             issue_number=issue_data.issue_number,
             service_series_id=issue_data.series_id,
@@ -103,7 +129,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
                 raise InvalidComicInputError(f"Unable to parse source: {source}")
 
     def get_issue_data(self, catalog_id: str) -> _MarvelIssueData:
-        issue_url = BASE_URL + ISSUE_PATH.format(catalog_id=catalog_id)
+        issue_url = BASE_URL + ISSUE_PATH + f"/{catalog_id}"
 
         response = self.client.get(issue_url)
         response.raise_for_status()
@@ -137,7 +163,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
     def get_metadata(self, digital_id: str) -> dict[str, Any]:
         if not digital_id.isdigit():
             raise InvalidComicInputError("Invalid Digital ID")
-        url = BIFROST_BASE_URL + METADATA_PATH.format(digital_id=digital_id)
+        url = BIFROST_BASE_URL + METADATA_PATH + f"/{digital_id}"
 
         response = self.client.get(url)
         response.raise_for_status()
@@ -148,13 +174,144 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
         return meta
 
+    def get_page_sources(self, digital_id: str) -> _MarvelPageSources:
+        if not digital_id.isdigit():
+            raise InvalidComicInputError("Invalid Digital ID")
+
+        url = BIFROST_BASE_URL + ASSETS_PATH + f"/{digital_id}"
+
+        response = self.client.get(url)
+        response.raise_for_status()
+
+        try:
+            result = response.json()["data"]["results"][0]
+            subscriber = result["auth_state"]["subscriber"]
+            pages = result["pages"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ServiceResponseError("Marvel response did not contain page assets") from exc
+
+        if not subscriber:
+            raise IneligibleError("Marvel Unlimited subscription required")
+
+        try:
+            ##########################3
+            #
+            # Noting for later:
+            #
+            # Marvel comics are served one page at a time. The first page is
+            # assumed to always be the cover.
+            #
+            return _MarvelPageSources(
+                cover=_MarvelPageSource(
+                    number=None,
+                    url=pages[0]["assets"]["source"],
+                ),
+                pages=list(
+                    _MarvelPageSource(
+                        number=number,
+                        url=page["assets"]["source"],
+                    )
+                    for number, page in enumerate(pages[1:], start=1)
+                ),
+            )
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ServiceResponseError("Marvel response contained invalid page asset data") from exc
+
+    def _download_image(self, url: str, filename: Path) -> DownloadedImageFile:
+        response = self.client.get(url)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "").split(";")[0]
+
+        if not content_type.startswith("image/"):
+            raise ServiceResponseError(
+                f"Expected image from {url}; got {content_type or 'no Content-Type'}"
+            )
+
+        extension = mimetypes.guess_extension(content_type)
+
+        if extension is None:
+            raise ServiceResponseError(f"Unknown extension for image content type: {content_type}")
+
+        with Image.open(BytesIO(response.content)) as img:
+            width, height = img.size
+            mode = img.mode
+
+        filename = filename.with_suffix(extension)
+        filename.write_bytes(response.content)
+
+        return DownloadedImageFile(
+            filename=filename,
+            width=width,
+            height=height,
+            content_type=content_type,
+            mode=mode,
+        )
+
+    def _source_hash(self, url: str) -> str:
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+    def get_pages(
+        self,
+        digital_id: str,
+        page_sources: _MarvelPageSources,
+    ) -> Pages:
+        work_dir = Path(WORK_PATH) / digital_id
+        work_dir.mkdir(parents=True, exist_ok=True)
+        self.work_dirs.append(work_dir)
+
+        url = page_sources.cover.url
+        filename = work_dir / f"UCD-cover-{self._source_hash(url)}"
+        cover_image = self._download_image(url, filename)
+
+        cover_page = Page(
+            number=None,
+            path=cover_image.filename,
+            width=cover_image.width,
+            height=cover_image.height,
+            content_type=cover_image.content_type,
+            mode=cover_image.mode,
+        )
+
+        page_list: list[Page] = []
+
+        for page_source in page_sources.pages:
+            filename = (
+                work_dir / f"UCD-{page_source.number:05}-{self._source_hash(page_source.url)}"
+            )
+
+            image = self._download_image(page_source.url, filename)
+            page_list.append(
+                Page(
+                    number=page_source.number,
+                    path=image.filename,
+                    width=image.width,
+                    height=image.height,
+                    content_type=image.content_type,
+                    mode=image.mode,
+                )
+            )
+
+        return Pages(
+            cover=cover_page,
+            pages=tuple(page_list),
+        )
+
+    def cleanup(self) -> None:
+        return
+        for path in self.work_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+
     def get_clf(self, source: str) -> CLF:
+        raise NotImplementedError
+
         if not (self.matches_url(source) or source.isdigit()):
             raise InvalidComicInputError(f"Invalid Marvel comic input: {source}")
 
         catalog_id = self.get_catalog_id(source)
         issue_data = self.get_issue_data(catalog_id)
-        digital_id = issue_data.digital_id
-        metadata = self.get_metadata(digital_id)
 
-        return self._metadata_to_clf(issue_data, metadata)
+        if issue_data:
+            ...
+
+
+#        return CLF(...)

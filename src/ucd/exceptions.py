@@ -14,5 +14,9 @@ class InvalidComicInputError(ComicDownloaderError):
     """A comic identifier couldn't be parsed"""
 
 
+class IneligibleError(ComicDownloaderError):
+    """The provided creditials are not allowed to fetch the page"""
+
+
 class ServiceResponseError(ComicDownloaderError):
     """A service returned an unexpected or malformed response."""

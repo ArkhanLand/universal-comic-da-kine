@@ -235,8 +235,7 @@ Conceptually:
 ```python
 class InputAdapter(ABC):
     @abstractmethod
-    def get_clf(self, source: str) -> CLF:
-        ...
+    def get_clf(self, source: str) -> CLF: ...
 ```
 
 For an online reader service, the adapter may internally:

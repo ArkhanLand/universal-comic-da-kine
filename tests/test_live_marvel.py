@@ -6,7 +6,7 @@ from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 
 
 @pytest.mark.network
-def test_marvel_live_issue_data() -> None:
+def test_marvel_live_get_issue_data() -> None:
     service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
     meta = service.get_issue_data("72984")
@@ -18,7 +18,7 @@ def test_marvel_live_issue_data() -> None:
 
 
 @pytest.mark.network
-def test_marvel_live_metadata() -> None:
+def test_marvel_live_get_metadata() -> None:
     """Test the web code that looks up live Marvel data"""
     service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
@@ -29,3 +29,48 @@ def test_marvel_live_metadata() -> None:
     assert meta["title"] == "House Of X (2019) #1", "Title"
     assert meta["series_title"] == "House Of X (2019)", "Series Title"
     assert meta["release_date"] == "2019-07-24", "Release Date"
+
+
+@pytest.mark.network
+def test_marvel_live_get_page_sources() -> None:
+    service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
+
+    sources = service.get_page_sources("51975")
+
+    assert sources.cover.number is None
+    assert sources.cover.url.startswith("https://cdn.marvel.com/")
+
+    assert len(sources.pages) > 0
+    assert sources.pages[0].number == 1
+    assert sources.pages[0].url.startswith("https://cdn.marvel.com/")
+
+    assert sources.pages[1].number == 2
+    assert sources.pages[1].url.startswith("https://cdn.marvel.com/")
+
+
+@pytest.mark.network
+def test_marvel_live_get_pages() -> None:
+    service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
+
+    digital_id = "51975"
+    sources = service.get_page_sources(digital_id)
+
+    pages = service.get_pages(
+        digital_id,
+        sources,
+    )
+
+    assert pages.cover.path.exists()
+    assert pages.cover.path.stat().st_size > 0
+    assert pages.cover.width > 0
+    assert pages.cover.height > 2
+    assert pages.cover.content_type.startswith("image/")
+
+    assert len(pages.pages) == 48
+
+    for page in pages.pages:
+        assert page.path.exists()
+        assert page.path.stat().st_size > 0
+        assert page.width > 0
+        assert page.height > 0
+        assert page.content_type.startswith("image/")

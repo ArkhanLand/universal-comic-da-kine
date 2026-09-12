@@ -1,10 +1,16 @@
+from io import BytesIO
 from typing import Any
 
 import httpx
 import pytest
+from PIL import Image
 
-from ucd.exceptions import InvalidComicInputError, ServiceResponseError
-from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
+from ucd.exceptions import (
+    IneligibleError,
+    InvalidComicInputError,
+    ServiceResponseError,
+)
+from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter, _MarvelPageSource, _MarvelPageSources
 
 
 def test_matches_marvel_issue_url() -> None:
@@ -164,3 +170,206 @@ def test_get_metadata(digital_id: str, expected: dict[str, Any] | type[ValueErro
         assert meta["title"] == "House Of X (2019) #1", "Title"
         assert meta["series_title"] == "House Of X (2019)", "Series Title"
         assert meta["release_date"] == "2019-07-24", "Release Date"
+
+
+page_sources_body = {
+    "data": {
+        "results": [
+            {
+                "auth_state": {
+                    "subscriber": True,
+                },
+                "pages": [
+                    {
+                        "assets": {
+                            "source": "https://example.com/page1.jpg",
+                        }
+                    },
+                    {
+                        "assets": {
+                            "source": "https://example.com/page2.jpg",
+                        }
+                    },
+                    {
+                        "assets": {
+                            "source": "https://example.com/page3.jpg",
+                        }
+                    },
+                ],
+            }
+        ]
+    }
+}
+
+
+def test_get_page_sources() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).endswith("/51975")
+        return httpx.Response(200, json=page_sources_body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    adapter = MarvelUnlimitedAdapter(client=client)
+
+    sources = adapter.get_page_sources("51975")
+
+    assert sources.cover == _MarvelPageSource(
+        number=None,
+        url="https://example.com/page1.jpg",
+    )
+
+    assert sources.pages == [
+        _MarvelPageSource(
+            number=1,
+            url="https://example.com/page2.jpg",
+        ),
+        _MarvelPageSource(
+            number=2,
+            url="https://example.com/page3.jpg",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "digital_id",
+    [
+        "no digital id here",
+        "Some other text",
+    ],
+)
+def test_get_page_sources_invalid_digital_id(digital_id: str) -> None:
+    adapter = MarvelUnlimitedAdapter()
+
+    with pytest.raises(InvalidComicInputError):
+        adapter.get_page_sources(digital_id)
+
+
+def test_get_page_sources_http_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    adapter = MarvelUnlimitedAdapter(client=client)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        adapter.get_page_sources("51975")
+
+
+def test_get_page_sources_requires_subscription():
+    body = {
+        "data": {
+            "results": [
+                {
+                    "auth_state": {
+                        "subscriber": False,
+                    },
+                    "pages": [],
+                }
+            ]
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    adapter = MarvelUnlimitedAdapter(client=client)
+
+    with pytest.raises(IneligibleError):
+        adapter.get_page_sources("51975")
+
+
+def test_download_image(tmp_path, httpx_mock):
+    image = Image.new("RGB", (100, 200))
+    buffer = BytesIO()
+
+    image.save(buffer, format="JPEG")
+    image_bytes = buffer.getvalue()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://example.com/page"
+
+        return httpx.Response(
+            200,
+            content=image_bytes,
+            headers={"Content-Type": "image/jpeg"},
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    adapter = MarvelUnlimitedAdapter(client=client)
+
+    result = adapter._download_image("https://example.com/page", tmp_path / "page")
+
+    assert result.filename == tmp_path / "page.jpg"
+    assert result.filename.exists()
+    assert result.filename.read_bytes() == image_bytes
+    assert result.width == 100
+    assert result.height == 200
+    assert result.content_type == "image/jpeg"
+    assert result.mode == "RGB"
+
+
+def test_get_pages(tmp_path, monkeypatch):
+    images = {}
+
+    for number, size in ((1, (100, 200)), (2, (300, 400)), (3, (500, 600))):
+        image = Image.new("RGB", size)
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG")
+        images[f"https://example.com/page{number}"] = buffer.getvalue()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=images[str(request.url)],
+            headers={"Content-Type": "image/jpeg"},
+        )
+
+    monkeypatch.setattr(
+        "ucd.input.marvel_unlimited.WORK_PATH",
+        tmp_path,
+    )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    adapter = MarvelUnlimitedAdapter(client=client)
+
+    sources = _MarvelPageSources(
+        cover=_MarvelPageSource(
+            number=None,
+            url="https://example.com/page1",
+        ),
+        pages=[
+            _MarvelPageSource(
+                number=1,
+                url="https://example.com/page2",
+            ),
+            _MarvelPageSource(
+                number=2,
+                url="https://example.com/page3",
+            ),
+        ],
+    )
+
+    pages = adapter.get_pages("51975", sources)
+
+    assert pages.cover.number is None
+    assert pages.cover.width == 100
+    assert pages.cover.height == 200
+    assert pages.cover.content_type == "image/jpeg"
+    assert pages.cover.mode == "RGB"
+    assert pages.cover.path.exists()
+
+    assert len(pages.pages) == 2
+
+    assert pages.pages[0].number == 1
+    assert pages.pages[0].width == 300
+    assert pages.pages[0].height == 400
+    assert pages.pages[0].content_type == "image/jpeg"
+    assert pages.pages[0].mode == "RGB"
+    assert pages.pages[0].path.exists()
+
+    assert pages.pages[1].number == 2
+    assert pages.pages[1].width == 500
+    assert pages.pages[1].height == 600
+    assert pages.pages[1].content_type == "image/jpeg"
+    assert pages.pages[1].mode == "RGB"
+    assert pages.pages[1].path.exists()
