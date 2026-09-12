@@ -7,7 +7,6 @@ from ucd.output.comicinfo import make_comicinfo
 
 def write_cbz(
     clf: CLF,
-    pages: list[Path],
     destination: Path,
     *,
     overwrite: bool = False,
@@ -19,5 +18,14 @@ def write_cbz(
 
     with ZipFile(destination, "w", compression=ZIP_STORED) as archive:
         archive.writestr("ComicInfo.xml", make_comicinfo(clf))
-        for page in sorted(pages):
-            archive.write(page, arcname=page.name)
+
+        archive.write(
+            clf.pages.cover.path,
+            arcname=f"00000{clf.pages.cover.path.suffix}",
+        )
+
+        for page in clf.pages.pages:
+            archive.write(
+                page.path,
+                arcname=f"{page.number:05}{page.path.suffix}",
+            )
