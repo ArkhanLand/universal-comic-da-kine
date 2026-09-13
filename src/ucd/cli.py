@@ -10,12 +10,17 @@ app = typer.Typer(no_args_is_help=True)
 
 
 class _ProgressBar:
-    def __init__(self, label: str, width: int = 30) -> None:
-        self.label = label
+    def __init__(self, width: int = 30, label_width: int = 32) -> None:
         self.width = width
+        self.label_width = label_width
         self._last_completed = -1
 
-    def update(self, completed: int, total: int) -> None:
+    def _display_label(self, label: str) -> str:
+        if len(label) <= self.label_width:
+            return label
+        return "…" + label[-(self.label_width - 1) :]
+
+    def update(self, label: str, completed: int, total: int) -> None:
         if completed == self._last_completed:
             return
 
@@ -25,7 +30,8 @@ class _ProgressBar:
         bar = "#" * filled + "-" * (self.width - filled)
         percent = int(ratio * 100)
         typer.echo(
-            f"\r{self.label} [{bar}] {completed}/{total} {percent:3d}%",
+            f"\rDownloading {self._display_label(label)} "
+            f"[{bar}] {completed}/{total} {percent:3d}%",
             nl=False,
         )
 
@@ -54,7 +60,7 @@ def download(
     """Download a Marvel Unlimited issue and write it as a CBZ."""
 
     adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file)
-    progress = _ProgressBar("Downloading pages")
+    progress = _ProgressBar()
 
     try:
         clf = adapter.get_clf(source, progress=progress.update)
