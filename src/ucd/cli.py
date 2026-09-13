@@ -19,6 +19,9 @@ class _ProgressBar:
         self.label_width = label_width
         self._last_completed = -1
 
+    def reset(self) -> None:
+        self._last_completed = -1
+
     def _display_label(self, label: str) -> str:
         if len(label) <= self.label_width:
             return label
@@ -67,12 +70,18 @@ def download(
         False,
         "--overwrite",
     ),
+    quit_on_error: bool = typer.Option(
+        False,
+        "--quit-on-error",
+        help="Stop after the first failed source.",
+    ),
 ) -> None:
     """Download one or more Marvel Unlimited issues as CBZ files."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file)
     progress = _ProgressBar()
+    failures = 0
 
     def check_destination(
         title: str,
@@ -89,23 +98,32 @@ def download(
 
     try:
         for source in sources:
-            clf = adapter.get_clf(
-                source,
-                progress=progress.update,
-                metadata_ready=check_destination,
-            )
-            destination = output_dir / make_cbz_filename(clf)
-            write_cbz(
-                clf,
-                destination,
-                overwrite=overwrite,
-            )
-            typer.echo(f"Wrote {destination}")
-    except FileExistsError as exc:
-        typer.echo(f"Error: output file already exists: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    except ComicDownloaderError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+            progress.reset()
+            try:
+                clf = adapter.get_clf(
+                    source,
+                    progress=progress.update,
+                    metadata_ready=check_destination,
+                )
+                destination = output_dir / make_cbz_filename(clf)
+                write_cbz(
+                    clf,
+                    destination,
+                    overwrite=overwrite,
+                )
+                typer.echo(f"Wrote {destination}")
+            except FileExistsError as exc:
+                failures += 1
+                typer.echo(f"Error: output file already exists: {exc}", err=True)
+                if quit_on_error:
+                    raise typer.Exit(code=1) from exc
+            except ComicDownloaderError as exc:
+                failures += 1
+                typer.echo(f"Error: {exc}", err=True)
+                if quit_on_error:
+                    raise typer.Exit(code=1) from exc
+
+        if failures:
+            raise typer.Exit(code=1)
     finally:
         adapter.cleanup()
