@@ -74,21 +74,21 @@ def download(
     adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file)
     progress = _ProgressBar()
 
+    def check_destination(
+        title: str,
+        series: str | None,
+        issue_number: str | None,
+    ) -> None:
+        destination = output_dir / make_cbz_filename_from_metadata(
+            title,
+            series,
+            issue_number,
+        )
+        if destination.exists() and not overwrite:
+            raise FileExistsError(destination)
+
     try:
         for source in sources:
-            def check_destination(
-                title: str,
-                series: str | None,
-                issue_number: str | None,
-            ) -> None:
-                destination = output_dir / make_cbz_filename_from_metadata(
-                    title,
-                    series,
-                    issue_number,
-                )
-                if destination.exists() and not overwrite:
-                    raise FileExistsError(destination)
-
             clf = adapter.get_clf(
                 source,
                 progress=progress.update,
