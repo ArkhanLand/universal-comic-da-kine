@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from ucd.models import CLF
 
-ProgressCallback = Callable[[int, int], None]
+ProgressCallback = Callable[[str, int, int], None]
 
 
 class InputAdapter(ABC):
