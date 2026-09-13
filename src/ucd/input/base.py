@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from ucd.models import CLF
+
+ProgressCallback = Callable[[int, int], None]
 
 
 class InputAdapter(ABC):
@@ -11,5 +14,9 @@ class InputAdapter(ABC):
         """Return True if this service handles the URL."""
 
     @abstractmethod
-    def get_clf(self, source: str) -> CLF:
-        """Return normalized metadata and page URLs."""
+    def get_clf(
+        self,
+        source: str,
+        progress: ProgressCallback | None = None,
+    ) -> CLF:
+        """Return a fully ingested comic-like file."""
