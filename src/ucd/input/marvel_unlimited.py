@@ -3,6 +3,7 @@ import json
 import mimetypes
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from http.cookiejar import MozillaCookieJar
@@ -256,7 +257,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
         self,
         digital_id: str,
         page_sources: _MarvelPageSources,
-        progress: ProgressCallback | None = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> Pages:
         work_dir = Path(WORK_PATH) / digital_id
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -328,7 +329,13 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
         metadata = self.get_metadata(issue_data.digital_id)
         page_sources = self.get_page_sources(issue_data.digital_id)
-        pages = self.get_pages(issue_data.digital_id, page_sources, progress=progress)
+
+        page_progress: Callable[[int, int], None] | None = None
+        if progress is not None:
+            title = str(metadata["title"])
+            page_progress = lambda completed, total: progress(title, completed, total)
+
+        pages = self.get_pages(issue_data.digital_id, page_sources, progress=page_progress)
 
         return self._build_clf(
             issue_data=issue_data,
