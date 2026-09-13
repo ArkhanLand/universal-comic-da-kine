@@ -11,10 +11,12 @@ def _sanitize_filename(value: str) -> str:
 
 
 def make_cbz_filename(clf: CLF) -> str:
-    series = clf.series or clf.title
-    name = series
+    if clf.series is None:
+        return _sanitize_filename(clf.title) + ".cbz"
 
-    if clf.publication_date is not None and not re.search(r"\(\d{4}\)$", series):
+    name = clf.series
+
+    if clf.publication_date is not None and not re.search(r"\(\d{4}\)$", clf.series):
         name += f" ({clf.publication_date.year})"
 
     if clf.issue_number is not None:
