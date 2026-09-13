@@ -8,10 +8,32 @@ ROLE_MAP = {
     "penciller": "Penciller",
     "inker": "Inker",
     "colorist": "Colorist",
+    "colourist": "Colorist",
     "letterer": "Letterer",
     "editor": "Editor",
     "cover artist": "CoverArtist",
+    "coverartist": "CoverArtist",
 }
+
+# ComicInfo.xml uses a controlled AgeRating vocabulary. Keep source-native values in
+# the CLF and normalize only when serializing to this target format.
+AGE_RATING_MAP = {
+    "rated t": "Teen",
+    "rated t+": "Teen",
+    "t": "Teen",
+    "t+": "Teen",
+    "teen": "Teen",
+}
+
+
+def _join(values: tuple[str, ...]) -> str | None:
+    return ", ".join(values) if values else None
+
+
+def _comicinfo_age_rating(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return AGE_RATING_MAP.get(value.strip().casefold(), value)
 
 
 # Makes the XML structure "ComicInfo.xml", as defined in the CBZ standard
@@ -26,10 +48,21 @@ def make_comicinfo(clf: CLF) -> bytes:
     add("Title", clf.title)
     add("Series", clf.series)
     add("Number", clf.issue_number)
+    add("Count", clf.series_count)
+    add("Volume", clf.volume)
     add("Summary", clf.description)
     add("Publisher", clf.publisher)
     add("Imprint", clf.imprint)
-    add("AgeRating", clf.age_rating)
+    add("Genre", _join(clf.genres))
+    add("Tags", _join(clf.tags))
+    add("Web", clf.source_url)
+    add("PageCount", 1 + len(clf.pages.pages))
+    add("LanguageISO", clf.language)
+    add("AgeRating", _comicinfo_age_rating(clf.age_rating))
+    add("StoryArc", _join(clf.story_arcs))
+    add("Characters", _join(clf.characters))
+    add("Teams", _join(clf.teams))
+    add("Locations", _join(clf.locations))
 
     if clf.publication_date:
         add("Year", clf.publication_date.year)
