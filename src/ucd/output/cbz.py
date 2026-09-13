@@ -9,16 +9,27 @@ def _sanitize_filename(value: str) -> str:
     return value.replace(":", "_").replace("/", "_")
 
 
-def make_cbz_filename(clf: CLF) -> str:
-    if clf.series is None:
-        return _sanitize_filename(clf.title) + ".cbz"
+def make_cbz_filename_from_metadata(
+    title: str,
+    series: str | None,
+    issue_number: str | None,
+) -> str:
+    if series is None:
+        return _sanitize_filename(title) + ".cbz"
 
-    name = clf.series
-
-    if clf.issue_number is not None:
-        name += f" #{clf.issue_number}"
+    name = series
+    if issue_number is not None:
+        name += f" #{issue_number}"
 
     return _sanitize_filename(name) + ".cbz"
+
+
+def make_cbz_filename(clf: CLF) -> str:
+    return make_cbz_filename_from_metadata(
+        clf.title,
+        clf.series,
+        clf.issue_number,
+    )
 
 
 def write_cbz(
