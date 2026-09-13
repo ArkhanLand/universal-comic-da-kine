@@ -4,7 +4,11 @@ import typer
 
 from ucd.exceptions import ComicDownloaderError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
-from ucd.output.cbz import make_cbz_filename, write_cbz
+from ucd.output.cbz import (
+    make_cbz_filename,
+    make_cbz_filename_from_metadata,
+    write_cbz,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -72,7 +76,24 @@ def download(
 
     try:
         for source in sources:
-            clf = adapter.get_clf(source, progress=progress.update)
+            def check_destination(
+                title: str,
+                series: str | None,
+                issue_number: str | None,
+            ) -> None:
+                destination = output_dir / make_cbz_filename_from_metadata(
+                    title,
+                    series,
+                    issue_number,
+                )
+                if destination.exists() and not overwrite:
+                    raise FileExistsError(destination)
+
+            clf = adapter.get_clf(
+                source,
+                progress=progress.update,
+                metadata_ready=check_destination,
+            )
             destination = output_dir / make_cbz_filename(clf)
             write_cbz(
                 clf,
@@ -80,6 +101,9 @@ def download(
                 overwrite=overwrite,
             )
             typer.echo(f"Wrote {destination}")
+    except FileExistsError as exc:
+        typer.echo(f"Error: output file already exists: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except ComicDownloaderError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
