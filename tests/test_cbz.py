@@ -6,7 +6,11 @@ from zipfile import ZipFile
 import pytest
 
 from ucd.models import CLF, Page, Pages
-from ucd.output.cbz import make_cbz_filename, write_cbz
+from ucd.output.cbz import (
+    make_cbz_filename,
+    make_cbz_filename_from_metadata,
+    write_cbz,
+)
 
 
 def make_test_clf(tmp_path: Path) -> CLF:
@@ -86,6 +90,17 @@ def test_cbz_filename_sanitizes_colon_and_slash(tmp_path: Path) -> None:
     )
 
     assert make_cbz_filename(clf) == "Example_ Alpha_Beta #7.cbz"
+
+
+def test_cbz_filename_can_be_generated_before_pages() -> None:
+    assert (
+        make_cbz_filename_from_metadata(
+            "House Of X (2019) #1",
+            "House Of X (2019)",
+            "1",
+        )
+        == "House Of X (2019) #1.cbz"
+    )
 
 
 def test_cbz_contains_metadata_cover_and_pages(tmp_path: Path) -> None:
