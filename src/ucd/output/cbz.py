@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
@@ -15,9 +14,6 @@ def make_cbz_filename(clf: CLF) -> str:
         return _sanitize_filename(clf.title) + ".cbz"
 
     name = clf.series
-
-    if clf.publication_date is not None and not re.search(r"\(\d{4}\)$", clf.series):
-        name += f" ({clf.publication_date.year})"
 
     if clf.issue_number is not None:
         name += f" #{clf.issue_number}"
