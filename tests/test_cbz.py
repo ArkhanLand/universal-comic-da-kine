@@ -55,7 +55,7 @@ def make_test_clf(tmp_path: Path) -> CLF:
     )
 
 
-def test_cbz_filename_uses_series_year_and_issue(tmp_path: Path) -> None:
+def test_cbz_filename_uses_authoritative_series_and_issue(tmp_path: Path) -> None:
     clf = replace(
         make_test_clf(tmp_path),
         series="House Of X (2019)",
@@ -66,7 +66,18 @@ def test_cbz_filename_uses_series_year_and_issue(tmp_path: Path) -> None:
     assert make_cbz_filename(clf) == "House Of X (2019) #1.cbz"
 
 
-def test_cbz_filename_adds_year_and_sanitizes_colon_and_slash(tmp_path: Path) -> None:
+def test_cbz_filename_preserves_series_variant(tmp_path: Path) -> None:
+    clf = replace(
+        make_test_clf(tmp_path),
+        series="The Unbeatable Squirrel Girl (2015B)",
+        issue_number="1",
+        publication_date=date(2015, 10, 28),
+    )
+
+    assert make_cbz_filename(clf) == "The Unbeatable Squirrel Girl (2015B) #1.cbz"
+
+
+def test_cbz_filename_sanitizes_colon_and_slash(tmp_path: Path) -> None:
     clf = replace(
         make_test_clf(tmp_path),
         series="Example: Alpha/Beta",
@@ -74,7 +85,7 @@ def test_cbz_filename_adds_year_and_sanitizes_colon_and_slash(tmp_path: Path) ->
         publication_date=date(2026, 9, 13),
     )
 
-    assert make_cbz_filename(clf) == "Example_ Alpha_Beta (2026) #7.cbz"
+    assert make_cbz_filename(clf) == "Example_ Alpha_Beta #7.cbz"
 
 
 def test_cbz_contains_metadata_cover_and_pages(tmp_path: Path) -> None:
