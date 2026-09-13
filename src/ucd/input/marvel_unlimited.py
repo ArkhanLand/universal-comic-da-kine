@@ -19,7 +19,7 @@ from ucd.exceptions import (
     InvalidComicInputError,
     ServiceResponseError,
 )
-from ucd.input.base import InputAdapter
+from ucd.input.base import InputAdapter, ProgressCallback
 from ucd.models import CLF, Creator, DownloadedImageFile, Page, Pages
 
 USER_AGENT = (
@@ -256,14 +256,23 @@ class MarvelUnlimitedAdapter(InputAdapter):
         self,
         digital_id: str,
         page_sources: _MarvelPageSources,
+        progress: ProgressCallback | None = None,
     ) -> Pages:
         work_dir = Path(WORK_PATH) / digital_id
         work_dir.mkdir(parents=True, exist_ok=True)
         self.work_dirs.append(work_dir)
 
+        total = len(page_sources.pages) + 1
+        completed = 0
+        if progress is not None:
+            progress(completed, total)
+
         url = page_sources.cover.url
         filename = work_dir / f"UCD-cover-{self._source_hash(url)}"
         cover_image = self._download_image(url, filename)
+        completed += 1
+        if progress is not None:
+            progress(completed, total)
 
         cover_page = Page(
             number=None,
@@ -292,6 +301,9 @@ class MarvelUnlimitedAdapter(InputAdapter):
                     mode=image.mode,
                 )
             )
+            completed += 1
+            if progress is not None:
+                progress(completed, total)
 
         return Pages(
             cover=cover_page,
@@ -303,7 +315,11 @@ class MarvelUnlimitedAdapter(InputAdapter):
         for path in self.work_dirs:
             shutil.rmtree(path, ignore_errors=True)
 
-    def get_clf(self, source: str) -> CLF:
+    def get_clf(
+        self,
+        source: str,
+        progress: ProgressCallback | None = None,
+    ) -> CLF:
         if not (self.matches_url(source) or source.isdigit()):
             raise InvalidComicInputError(f"Invalid Marvel comic input: {source}")
 
@@ -312,7 +328,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
         metadata = self.get_metadata(issue_data.digital_id)
         page_sources = self.get_page_sources(issue_data.digital_id)
-        pages = self.get_pages(issue_data.digital_id, page_sources)
+        pages = self.get_pages(issue_data.digital_id, page_sources, progress=progress)
 
         return self._build_clf(
             issue_data=issue_data,
