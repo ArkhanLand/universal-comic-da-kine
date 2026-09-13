@@ -333,7 +333,11 @@ class MarvelUnlimitedAdapter(InputAdapter):
         page_progress: Callable[[int, int], None] | None = None
         if progress is not None:
             title = str(metadata["title"])
-            page_progress = lambda completed, total: progress(title, completed, total)
+
+            def report_page_progress(completed: int, total: int) -> None:
+                progress(title, completed, total)
+
+            page_progress = report_page_progress
 
         pages = self.get_pages(issue_data.digital_id, page_sources, progress=page_progress)
 
