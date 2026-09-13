@@ -2,20 +2,46 @@ from pathlib import Path
 
 import typer
 
+from ucd.exceptions import ComicDownloaderError
+from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
+from ucd.output.cbz import write_cbz
+
 app = typer.Typer(no_args_is_help=True)
 
 
 @app.command()
 def download(
-    url: str,
-    output: Path = typer.Option(Path("downloads"), "--output", "-d"),
-    overwrite: bool = typer.Option(False, "--overwrite", "-o"),
-    kill_cache: bool = typer.Option(False, "--kill-cache", "-k"),
+    source: str,
+    output: Path = typer.Option(
+        Path("output.cbz"),
+        "--output",
+        "-o",
+    ),
+    cookie_file: Path = typer.Option(
+        Path("cookies.txt"),
+        "--cookies",
+        "-c",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+    ),
 ) -> None:
-    """Acquire and package a comic-like publication."""
-    typer.echo(f"URL: {url}")
-    typer.echo(f"Output directory: {output}")
-    typer.echo(f"Overwrite archive: {overwrite}")
-    typer.echo(f"Remove & re-fetch cached source pages: {kill_cache}")
-    typer.echo("No services are registered yet.")
-    raise typer.Exit(code=2)
+    """Download a Marvel Unlimited issue and write it as a CBZ."""
+
+    adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file)
+
+    try:
+        clf = adapter.get_clf(source)
+        write_cbz(
+            clf,
+            output,
+            overwrite=overwrite,
+        )
+    except ComicDownloaderError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        adapter.cleanup()
+
+    typer.echo(f"Wrote {output}")
