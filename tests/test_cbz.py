@@ -1,10 +1,12 @@
+from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 
 from ucd.models import CLF, Page, Pages
-from ucd.output.cbz import write_cbz
+from ucd.output.cbz import make_cbz_filename, write_cbz
 
 
 def make_test_clf(tmp_path: Path) -> CLF:
@@ -51,6 +53,28 @@ def make_test_clf(tmp_path: Path) -> CLF:
             ),
         ),
     )
+
+
+def test_cbz_filename_uses_series_year_and_issue(tmp_path: Path) -> None:
+    clf = replace(
+        make_test_clf(tmp_path),
+        series="House Of X (2019)",
+        issue_number="1",
+        publication_date=date(2019, 7, 24),
+    )
+
+    assert make_cbz_filename(clf) == "House Of X (2019) #1.cbz"
+
+
+def test_cbz_filename_adds_year_and_sanitizes_colon_and_slash(tmp_path: Path) -> None:
+    clf = replace(
+        make_test_clf(tmp_path),
+        series="Example: Alpha/Beta",
+        issue_number="7",
+        publication_date=date(2026, 9, 13),
+    )
+
+    assert make_cbz_filename(clf) == "Example_ Alpha_Beta (2026) #7.cbz"
 
 
 def test_cbz_contains_metadata_cover_and_pages(tmp_path: Path) -> None:
