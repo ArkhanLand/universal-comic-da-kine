@@ -4,6 +4,7 @@ from collections.abc import Callable
 from ucd.models import CLF
 
 ProgressCallback = Callable[[str, int, int], None]
+MetadataCallback = Callable[[str, str | None, str | None], None]
 
 
 class InputAdapter(ABC):
@@ -18,5 +19,6 @@ class InputAdapter(ABC):
         self,
         source: str,
         progress: ProgressCallback | None = None,
+        metadata_ready: MetadataCallback | None = None,
     ) -> CLF:
         """Return a fully ingested comic-like file."""
