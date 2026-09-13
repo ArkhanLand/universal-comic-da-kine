@@ -4,7 +4,7 @@ import typer
 
 from ucd.exceptions import ComicDownloaderError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
-from ucd.output.cbz import write_cbz
+from ucd.output.cbz import make_cbz_filename, write_cbz
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -38,13 +38,21 @@ class _ProgressBar:
             typer.echo()
 
 
+@app.callback()
+def main() -> None:
+    """Universal Comic Da Kine."""
+
+
 @app.command()
 def download(
-    source: str,
-    output: Path = typer.Option(
-        Path("output.cbz"),
-        "--output",
+    sources: list[str] = typer.Argument(..., metavar="SOURCE..."),
+    output_dir: Path = typer.Option(
+        Path("."),
+        "--output-dir",
         "-o",
+        envvar="UCD_OUTPUT_DIR",
+        file_okay=False,
+        help="Directory for generated comic files.",
     ),
     cookie_file: Path = typer.Option(
         Path("cookies.txt"),
@@ -56,22 +64,24 @@ def download(
         "--overwrite",
     ),
 ) -> None:
-    """Download a Marvel Unlimited issue and write it as a CBZ."""
+    """Download one or more Marvel Unlimited issues as CBZ files."""
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file)
     progress = _ProgressBar()
 
     try:
-        clf = adapter.get_clf(source, progress=progress.update)
-        write_cbz(
-            clf,
-            output,
-            overwrite=overwrite,
-        )
+        for source in sources:
+            clf = adapter.get_clf(source, progress=progress.update)
+            destination = output_dir / make_cbz_filename(clf)
+            write_cbz(
+                clf,
+                destination,
+                overwrite=overwrite,
+            )
+            typer.echo(f"Wrote {destination}")
     except ComicDownloaderError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     finally:
         adapter.cleanup()
-
-    typer.echo(f"Wrote {output}")
