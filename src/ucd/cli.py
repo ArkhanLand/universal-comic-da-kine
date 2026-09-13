@@ -30,8 +30,7 @@ class _ProgressBar:
         bar = "#" * filled + "-" * (self.width - filled)
         percent = int(ratio * 100)
         typer.echo(
-            f"\rDownloading {self._display_label(label)} "
-            f"[{bar}] {completed}/{total} {percent:3d}%",
+            f"\rDownloading {self._display_label(label)} [{bar}] {completed}/{total} {percent:3d}%",
             nl=False,
         )
 
