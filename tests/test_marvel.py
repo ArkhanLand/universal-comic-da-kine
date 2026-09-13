@@ -475,7 +475,7 @@ def test_get_clf(monkeypatch):
     monkeypatch.setattr(
         adapter,
         "get_pages",
-        lambda digital_id, sources: pages,
+        lambda digital_id, sources, progress=None: pages,
     )
 
     clf = adapter.get_clf("https://www.marvel.com/comics/issue/72984")
