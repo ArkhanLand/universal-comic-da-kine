@@ -20,7 +20,7 @@ from ucd.exceptions import (
     InvalidComicInputError,
     ServiceResponseError,
 )
-from ucd.input.base import InputAdapter, ProgressCallback
+from ucd.input.base import InputAdapter, MetadataCallback, ProgressCallback
 from ucd.models import CLF, Creator, DownloadedImageFile, Page, Pages
 
 USER_AGENT = (
@@ -320,6 +320,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
         self,
         source: str,
         progress: ProgressCallback | None = None,
+        metadata_ready: MetadataCallback | None = None,
     ) -> CLF:
         if not (self.matches_url(source) or source.isdigit()):
             raise InvalidComicInputError(f"Invalid Marvel comic input: {source}")
@@ -328,6 +329,13 @@ class MarvelUnlimitedAdapter(InputAdapter):
         issue_data = self.get_issue_data(catalog_id)
 
         metadata = self.get_metadata(issue_data.digital_id)
+        if metadata_ready is not None:
+            metadata_ready(
+                str(metadata["title"]),
+                str(metadata["series_title"]),
+                issue_data.issue_number,
+            )
+
         page_sources = self.get_page_sources(issue_data.digital_id)
 
         page_progress: Callable[[int, int], None] | None = None
