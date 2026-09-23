@@ -184,6 +184,5 @@ def test_cbz_filename_does_not_normalize_non_year_dashes() -> None:
             "Spider-Man - Deadpool",
             "1",
         )
-        == "Spider-Man - Deadpool #1.cbz",
-        "Only normalize year ranges, nothing else."
-    )
+        == "Spider-Man - Deadpool #1.cbz"
+    ), "Only normalize year ranges, nothing else."
