@@ -100,7 +100,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             publisher="Marvel",
             description=metadata["description"],
             age_rating=metadata["rating"],
-            imprint=metadata["imprint"],
+            imprint=metadata.get("imprint"),
             thumbnail_url=f"{metadata['thumbnail']['path']}.{metadata['thumbnail']['extension']}",
             creators=tuple(
                 Creator(
