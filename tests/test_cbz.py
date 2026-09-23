@@ -221,3 +221,15 @@ def test_cbz_filename_year_ranges(
         )
         == expected
     )
+
+
+def test_cbz_filename_does_not_normalize_non_year_dashes() -> None:
+    assert (
+        make_cbz_filename_from_metadata(
+            "Spider-Man - Deadpool #1",
+            "Spider-Man - Deadpool",
+            "1",
+        )
+        == "Spider-Man - Deadpool #1.cbz",
+        "Only normalize year ranges, nothing else."
+    )
