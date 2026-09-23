@@ -142,3 +142,82 @@ def test_cbz_overwrites_when_requested(tmp_path: Path) -> None:
 
     with ZipFile(destination) as archive:
         assert "ComicInfo.xml" in archive.namelist()
+
+
+@pytest.mark.parametrize(
+    ("series", "expected"),
+    [
+        pytest.param(
+            "Doctor Strange (2022-2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range Hyphen 1",
+        ),
+        pytest.param(
+            "Doctor Strange (2022 - 2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range Hyphen 2",
+        ),
+        pytest.param(
+            "Doctor Strange (2022- 2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range Hyphen 3",
+        ),
+        pytest.param(
+            "Doctor Strange (2022 -2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range Hyphen 4",
+        ),
+        pytest.param(
+            "Doctor Strange (2022–2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range en dash 1",
+        ),
+        pytest.param(
+            "Doctor Strange (2022– 2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range en dash 2",
+        ),
+        pytest.param(
+            "Doctor Strange (2022 –2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range en dash 3",
+        ),
+        pytest.param(
+            "Doctor Strange (2022 – 2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range en dash 4",
+        ),
+        pytest.param(
+            "Doctor Strange (2022—2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range em dash 1",
+        ),
+        pytest.param(
+            "Doctor Strange (2022— 2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range em dash 2",
+        ),
+        pytest.param(
+            "Doctor Strange (2022 —2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range em dash 3",
+        ),
+        pytest.param(
+            "Doctor Strange (2022 — 2024)",
+            "Doctor Strange (2022–2024) #1.cbz",
+            id="Date Range em dash 4",
+        ),
+    ],
+)
+def test_cbz_filename_year_ranges(
+    series: str,
+    expected: str,
+) -> None:
+    assert (
+        make_cbz_filename_from_metadata(
+            f"{series} #1",
+            series,
+            "1",
+        )
+        == expected
+    )

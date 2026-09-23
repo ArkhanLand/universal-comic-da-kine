@@ -1,11 +1,22 @@
+import re
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
 from ucd.models import CLF
 from ucd.output.comicinfo import make_comicinfo
 
+_YEAR_RANGE_RE = re.compile(r"(\d{4}) ?[-\N{EN DASH}\N{EM DASH}] ?(\d{4})")
+
+
+def _normalize_year_ranges(value: str) -> str:
+    return _YEAR_RANGE_RE.sub(
+        lambda match: f"{match[1]}\N{EN DASH}{match[2]}",
+        value,
+    )
+
 
 def _sanitize_filename(value: str) -> str:
+    value = _normalize_year_ranges(value)
     return value.replace(":", "_").replace("/", "_")
 
 
