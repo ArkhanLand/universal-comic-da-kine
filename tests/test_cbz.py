@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -186,3 +187,16 @@ def test_cbz_filename_does_not_normalize_non_year_dashes() -> None:
         )
         == "Spider-Man - Deadpool #1.cbz"
     ), "Only normalize year ranges, nothing else."
+
+
+def test_cbz_contains_comicbookinfo_comment(tmp_path: Path) -> None:
+    clf = make_test_clf(tmp_path)
+    destination = tmp_path / "example.cbz"
+
+    write_cbz(clf, destination)
+
+    with ZipFile(destination) as archive:
+        data = json.loads(archive.comment.decode("utf-8"))
+
+    assert data["appID"] == "Universal Comic Da Kine"
+    assert data["ComicBookInfo/1.0"]["title"] == "Example #1"

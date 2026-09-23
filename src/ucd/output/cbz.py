@@ -3,8 +3,10 @@ from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
 from ucd.models import CLF
+from ucd.output.comicbookinfo import make_comicbookinfo
 from ucd.output.comicinfo import make_comicinfo
 
+ZIP_COMMENT_MAX = 65535
 _YEAR_RANGE_RE = re.compile(r"(\d{4}) ?[-\N{EN DASH}\N{EM DASH}] ?(\d{4})")
 
 
@@ -52,9 +54,18 @@ def write_cbz(
     if destination.exists() and not overwrite:
         raise FileExistsError(destination)
 
+    comment = make_comicbookinfo(clf)
+
+    if len(comment) > ZIP_COMMENT_MAX:
+        raise ValueError(
+            f"ComicBookInfo comment is {len(comment)} bytes; "
+            f"ZIP comments are limited to {ZIP_COMMENT_MAX} bytes"
+        )
+
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     with ZipFile(destination, "w", compression=ZIP_STORED) as archive:
+        archive.comment = comment
         archive.writestr("ComicInfo.xml", make_comicinfo(clf))
 
         archive.write(
