@@ -1,16 +1,16 @@
+import xml.etree.ElementTree as ET
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
-from ucd.models import CLF, Creator, Page, Pages
+from tests.helpers import make_test_clf
+from ucd.models import Creator
 from ucd.output.comicinfo import make_comicinfo
 
 
-def test_comicinfo_contains_metadata() -> None:
-    clf = CLF(
-        service="example",
-        service_id="1",
-        service_series_id="2",
-        title="Example #1",
+def test_comicinfo_contains_metadata(tmp_path: Path) -> None:
+    clf = replace(
+        make_test_clf(tmp_path),
         source_url="https://example.com/comic/1",
         series="Example",
         issue_number="1",
@@ -21,6 +21,7 @@ def test_comicinfo_contains_metadata() -> None:
         imprint="Example Imprint",
         language="en",
         age_rating="RATED T+",
+        description="Example description",
         genres=("Superhero", "Science Fiction"),
         tags=("Example Tag",),
         story_arcs=("Example Arc",),
@@ -32,57 +33,35 @@ def test_comicinfo_contains_metadata() -> None:
             Creator("Pat Pencil", "penciller"),
             Creator("Casey Cover", "cover artist"),
         ),
-        pages=Pages(
-            cover=Page(
-                number=None,
-                path=Path("/tmp/cover.jpg"),
-                width=100,
-                height=150,
-                content_type="image/jpeg",
-                mode="RGB",
-            ),
-            pages=(
-                Page(
-                    number=1,
-                    path=Path("/tmp/00001.jpg"),
-                    width=100,
-                    height=150,
-                    content_type="image/jpeg",
-                    mode="RGB",
-                ),
-                Page(
-                    number=2,
-                    path=Path("/tmp/00002.jpg"),
-                    width=100,
-                    height=150,
-                    content_type="image/jpeg",
-                    mode="RGB",
-                ),
-            ),
-        ),
     )
-    xml = make_comicinfo(clf).decode()
 
-    assert "<Title>Example #1</Title>" in xml
-    assert "<Series>Example</Series>" in xml
-    assert "<Number>1</Number>" in xml
-    assert "<Count>12</Count>" in xml
-    assert "<Volume>2</Volume>" in xml
-    assert "<Publisher>Example Comics</Publisher>" in xml
-    assert "<Imprint>Example Imprint</Imprint>" in xml
-    assert "<Genre>Superhero, Science Fiction</Genre>" in xml
-    assert "<Tags>Example Tag</Tags>" in xml
-    assert "<Web>https://example.com/comic/1</Web>" in xml
-    assert "<PageCount>3</PageCount>" in xml
-    assert "<LanguageISO>en</LanguageISO>" in xml
-    assert "<AgeRating>Teen</AgeRating>" in xml
-    assert "<StoryArc>Example Arc</StoryArc>" in xml
-    assert "<Characters>Alice, Bob</Characters>" in xml
-    assert "<Teams>Example Team</Teams>" in xml
-    assert "<Locations>Example City</Locations>" in xml
-    assert "<Year>2026</Year>" in xml
-    assert "<Month>9</Month>" in xml
-    assert "<Day>3</Day>" in xml
-    assert "<Writer>Jane Writer</Writer>" in xml
-    assert "<Penciller>Pat Pencil</Penciller>" in xml
-    assert "<CoverArtist>Casey Cover</CoverArtist>" in xml
+    root = ET.fromstring(make_comicinfo(clf))
+
+    def value(tag: str) -> str | None:
+        element = root.find(tag)
+        return element.text if element is not None else None
+
+    assert value("Title") == "Example #1"
+    assert value("Series") == "Example"
+    assert value("Number") == "1"
+    assert value("Count") == "12"
+    assert value("Volume") == "2"
+    assert value("Summary") == "Example description"
+    assert value("Publisher") == "Example Comics"
+    assert value("Imprint") == "Example Imprint"
+    assert value("Genre") == "Superhero, Science Fiction"
+    assert value("Tags") == "Example Tag"
+    assert value("Web") == "https://example.com/comic/1"
+    assert value("PageCount") == "3"
+    assert value("LanguageISO") == "en"
+    assert value("AgeRating") == "Teen"
+    assert value("StoryArc") == "Example Arc"
+    assert value("Characters") == "Alice, Bob"
+    assert value("Teams") == "Example Team"
+    assert value("Locations") == "Example City"
+    assert value("Year") == "2026"
+    assert value("Month") == "9"
+    assert value("Day") == "3"
+    assert value("Writer") == "Jane Writer"
+    assert value("Penciller") == "Pat Pencil"
+    assert value("CoverArtist") == "Casey Cover"
