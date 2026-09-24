@@ -73,8 +73,8 @@ def write_cbz(
             arcname=f"00000{clf.pages.cover.path.suffix}",
         )
 
-        for page in clf.pages.pages:
+        for asset_index, page in enumerate(clf.pages.pages, start=1):
             archive.write(
                 page.path,
-                arcname=f"{page.number:05}{page.path.suffix}",
+                arcname=f"{asset_index:05}{page.path.suffix}",
             )

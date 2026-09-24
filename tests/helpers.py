@@ -22,7 +22,7 @@ def make_test_clf(tmp_path: Path) -> CLF:
         title="Example #1",
         pages=Pages(
             cover=Page(
-                number=None,
+                numbers=(),
                 path=cover,
                 width=100,
                 height=150,
@@ -31,7 +31,7 @@ def make_test_clf(tmp_path: Path) -> CLF:
             ),
             pages=(
                 Page(
-                    number=1,
+                    numbers=(1,),
                     path=page1,
                     width=100,
                     height=150,
@@ -39,7 +39,7 @@ def make_test_clf(tmp_path: Path) -> CLF:
                     mode="RGB",
                 ),
                 Page(
-                    number=2,
+                    numbers=(2,),
                     path=page2,
                     width=100,
                     height=150,

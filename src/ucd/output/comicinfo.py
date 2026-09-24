@@ -56,7 +56,7 @@ def make_comicinfo(clf: CLF) -> bytes:
     add("Genre", _join(clf.genres))
     add("Tags", _join(clf.tags))
     add("Web", clf.source_url)
-    add("PageCount", 1 + len(clf.pages.pages))
+    add("PageCount", clf.pages.logical_page_count)
     add("LanguageISO", clf.language)
     add("AgeRating", _comicinfo_age_rating(clf.age_rating))
     add("StoryArc", _join(clf.story_arcs))
@@ -79,6 +79,20 @@ def make_comicinfo(clf: CLF) -> bytes:
 
     for tag, names in grouped.items():
         add(tag, ", ".join(names))
+
+    if clf.reading_direction == "rtl":
+        add("Manga", "YesAndRightToLeft")
+
+    # Image indices address archive assets, including the cover at index zero.
+    page_info = ET.SubElement(root, "Pages")
+    for index, page in enumerate((clf.pages.cover, *clf.pages.pages)):
+        attributes = {"Image": str(index)}
+        if index == 0:
+            attributes["Type"] = "FrontCover"
+        # ComicInfo has no exact representation for unknown or 3+ page spans.
+        if page.numbers is not None and len(page.numbers) <= 2:
+            attributes["DoublePage"] = "true" if len(page.numbers) == 2 else "false"
+        ET.SubElement(page_info, "Page", attributes)
 
     ET.indent(root, space="  ")
     xml: bytes = ET.tostring(

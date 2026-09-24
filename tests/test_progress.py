@@ -32,10 +32,10 @@ def test_get_pages_reports_progress(tmp_path, monkeypatch) -> None:
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
     sources = _MarvelPageSources(
-        cover=_MarvelPageSource(number=None, url="https://example.com/page1"),
+        cover=_MarvelPageSource(numbers=(), url="https://example.com/page1"),
         pages=[
-            _MarvelPageSource(number=1, url="https://example.com/page2"),
-            _MarvelPageSource(number=2, url="https://example.com/page3"),
+            _MarvelPageSource(numbers=(1,), url="https://example.com/page2"),
+            _MarvelPageSource(numbers=(2,), url="https://example.com/page3"),
         ],
     )
     updates: list[tuple[int, int]] = []

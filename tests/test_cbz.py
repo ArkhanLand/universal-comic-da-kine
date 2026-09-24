@@ -200,3 +200,26 @@ def test_cbz_contains_comicbookinfo_comment(tmp_path: Path) -> None:
 
     assert data["appID"] == "Universal Comic Da Kine"
     assert data["ComicBookInfo/1.0"]["title"] == "Example #1"
+
+
+def test_cbz_filenames_follow_asset_order_for_every_mapping(tmp_path: Path) -> None:
+    clf = make_test_clf(tmp_path)
+    mappings = [(18, 19), (), None, (17,), (20, 21, 22, 23)]
+    pages = []
+    for index, numbers in enumerate(mappings):
+        path = tmp_path / f"source-{index}.png"
+        path.write_bytes(f"image-{index}".encode())
+        pages.append(replace(clf.pages.pages[0], numbers=numbers, path=path))
+    clf = replace(clf, pages=replace(clf.pages, pages=tuple(pages)))
+    destination = tmp_path / "mixed.cbz"
+    write_cbz(clf, destination)
+    with ZipFile(destination) as archive:
+        assert archive.namelist() == [
+            "ComicInfo.xml",
+            "00000.jpg",
+            *[f"{i:05}.png" for i in range(1, 6)],
+        ]
+        assert archive.read("00000.jpg") == b"cover"
+        for index in range(5):
+            assert archive.read(f"{index + 1:05}.png") == f"image-{index}".encode()
+        assert b"<PageCount>" not in archive.read("ComicInfo.xml")

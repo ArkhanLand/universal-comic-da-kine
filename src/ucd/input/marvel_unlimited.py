@@ -3,17 +3,19 @@ import json
 import mimetypes
 import re
 import shutil
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from http.cookiejar import MozillaCookieJar
 from io import BytesIO
+from math import isclose
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageChops
 
 from ucd.exceptions import (
     IneligibleError,
@@ -48,7 +50,7 @@ class _MarvelIssueData:
 
 @dataclass(frozen=True, slots=True)
 class _MarvelPageSource:
-    number: int | None
+    numbers: tuple[int, ...] | None
     url: str
 
 
@@ -56,6 +58,106 @@ class _MarvelPageSource:
 class _MarvelPageSources:
     cover: _MarvelPageSource
     pages: list[_MarvelPageSource]
+
+
+def _pagination_dimensions(page: Page) -> tuple[int, int] | None:
+    """Derive image width and height excluding uniform black edge bands.
+
+    A channel tolerance of 8 accommodates near-solid JPEG padding. Only complete
+    outer rows/columns are excluded; interior gutters and white paper margins are
+    left alone. Stored bytes and recorded dimensions are unchanged.
+    """
+    with Image.open(page.path) as original:
+        image = original.convert("RGB")
+    # Each channel is a grayscale image, not a scalar: its pixels hold that
+    # color component's intensity (0-255) at the original image dimensions.
+    red, green, blue = image.split()
+    # lighter() takes the larger value at each pixel. Combining all three
+    # channels gives max(R, G, B), so a pixel is near-black only if every
+    # component is at most 8. This is not perceptual brightness.
+    brightness = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    # point() applies a 256-entry lookup table: intensities 0-8 become zero,
+    # and 9-255 become 255. getbbox() encloses all nonzero mask pixels,
+    # returning (left, top, right, bottom), or None for an all-black mask.
+    # The rectangle excludes black outer bands without removing dark areas
+    # inside the artwork; right and bottom are exclusive coordinates.
+    content = brightness.point([0] * 9 + [255] * 247).getbbox()
+    if content is None:
+        return None
+    left, top, right, bottom = content
+    return right - left, bottom - top
+
+
+def _inferred_span(dimensions: tuple[int, int], reference: tuple[int, int]) -> int | None:
+    """Scale the measurement to the reference height; accept integer spans within 1%."""
+    width, height = dimensions
+    reference_width, reference_height = reference
+    if min(width, height, reference_width, reference_height) <= 0:
+        return None
+    scaled_width = width * reference_height / height
+    relative_span = scaled_width / reference_width
+    span = round(relative_span)
+    return span if span >= 1 and isclose(relative_span, span, rel_tol=0.01) else None
+
+
+def _infer_page_numbers(pages: Pages) -> Pages:
+    """Estimate horizontal spans against the dominant portrait interior dimensions.
+
+    This is a Marvel import heuristic, not a model invariant or source assertion.
+    Explicit mappings win. An ambiguous span raises rather than silently producing
+    incomplete logical pagination. Counts describe the supplied digital edition,
+    not omitted print pages. Uniform multi-page assets can defeat the assumed
+    single-page reference; dimensions alone cannot resolve that ambiguity.
+    """
+    if all(page.numbers is not None for page in pages.pages):
+        return pages
+    candidates = Counter(
+        (page.width, page.height)
+        for page in pages.pages
+        if 0 < page.width < page.height and (page.numbers is None or len(page.numbers) == 1)
+    )
+    if candidates:
+        reference = candidates.most_common(1)[0][0]
+    elif 0 < pages.cover.width < pages.cover.height:
+        reference = (pages.cover.width, pages.cover.height)
+    else:
+        page = next(page for page in pages.pages if page.numbers is None)
+        raise ValueError(
+            f"Cannot infer logical page span for {page.path}: no portrait single-page "
+            "reference is available. Supply explicit page-number mappings."
+        )
+
+    next_number = 1
+    inferred = []
+    for page in pages.pages:
+        if page.numbers is not None:
+            if page.numbers:
+                next_number = max(page.numbers) + 1
+        else:
+            # Ordinary print-page margins are part of the page rectangle. Only
+            # try trimming padding when the original dimensions do not fit.
+            dimensions: tuple[int, int] | None = (page.width, page.height)
+            span = _inferred_span((page.width, page.height), reference)
+            if span is None:
+                dimensions = _pagination_dimensions(page)
+                if dimensions is not None:
+                    span = _inferred_span(dimensions, reference)
+            if span is None:
+                measurement = (
+                    f"{dimensions[0]} x {dimensions[1]} after black-border measurement"
+                    if dimensions is not None
+                    else "no nonblack content"
+                )
+                raise ValueError(
+                    f"Cannot infer logical page span for {page.path}: "
+                    f"original {page.width} x {page.height}, {measurement}, "
+                    f"reference {reference[0]} x {reference[1]}; "
+                    "no positive integer span within 1%. Supply an explicit page-number mapping."
+                )
+            page = replace(page, numbers=tuple(range(next_number, next_number + span)))
+            next_number += span
+        inferred.append(page)
+    return replace(pages, pages=tuple(inferred))
 
 
 class MarvelUnlimitedAdapter(InputAdapter):
@@ -197,24 +299,19 @@ class MarvelUnlimitedAdapter(InputAdapter):
             raise IneligibleError("Marvel Unlimited subscription required")
 
         try:
-            ##########################3
-            #
-            # Noting for later:
-            #
-            # Marvel comics are served one page at a time. The first page is
-            # assumed to always be the cover.
-            #
+            # The first asset is treated as the cover. Asset sequence alone does
+            # not establish logical pagination: an image may contain a spread.
             return _MarvelPageSources(
                 cover=_MarvelPageSource(
-                    number=None,
+                    numbers=(),
                     url=pages[0]["assets"]["source"],
                 ),
                 pages=list(
                     _MarvelPageSource(
-                        number=number,
+                        numbers=None,
                         url=page["assets"]["source"],
                     )
-                    for number, page in enumerate(pages[1:], start=1)
+                    for page in pages[1:]
                 ),
             )
         except (KeyError, IndexError, TypeError) as exc:
@@ -258,6 +355,8 @@ class MarvelUnlimitedAdapter(InputAdapter):
         digital_id: str,
         page_sources: _MarvelPageSources,
         progress: Callable[[int, int], None] | None = None,
+        *,
+        infer_pagination: bool = True,
     ) -> Pages:
         work_dir = Path(WORK_PATH) / digital_id
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -276,7 +375,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             progress(completed, total)
 
         cover_page = Page(
-            number=None,
+            numbers=(),
             path=cover_image.filename,
             width=cover_image.width,
             height=cover_image.height,
@@ -286,15 +385,13 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
         page_list: list[Page] = []
 
-        for page_source in page_sources.pages:
-            filename = (
-                work_dir / f"UCD-{page_source.number:05}-{self._source_hash(page_source.url)}"
-            )
+        for asset_index, page_source in enumerate(page_sources.pages, start=1):
+            filename = work_dir / f"UCD-{asset_index:05}-{self._source_hash(page_source.url)}"
 
             image = self._download_image(page_source.url, filename)
             page_list.append(
                 Page(
-                    number=page_source.number,
+                    numbers=page_source.numbers,
                     path=image.filename,
                     width=image.width,
                     height=image.height,
@@ -306,10 +403,8 @@ class MarvelUnlimitedAdapter(InputAdapter):
             if progress is not None:
                 progress(completed, total)
 
-        return Pages(
-            cover=cover_page,
-            pages=tuple(page_list),
-        )
+        pages = Pages(cover=cover_page, pages=tuple(page_list))
+        return _infer_page_numbers(pages) if infer_pagination else pages
 
     def cleanup(self) -> None:
         return
@@ -347,7 +442,12 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
             page_progress = report_page_progress
 
-        pages = self.get_pages(issue_data.digital_id, page_sources, progress=page_progress)
+        pages = self.get_pages(
+            issue_data.digital_id,
+            page_sources,
+            progress=page_progress,
+            infer_pagination=metadata.get("digital_format", "print") == "print",
+        )
 
         return self._build_clf(
             issue_data=issue_data,

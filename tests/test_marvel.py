@@ -221,17 +221,17 @@ def test_get_page_sources() -> None:
     sources = adapter.get_page_sources("51975")
 
     assert sources.cover == _MarvelPageSource(
-        number=None,
+        numbers=(),
         url="https://example.com/page1.jpg",
     )
 
     assert sources.pages == [
         _MarvelPageSource(
-            number=1,
+            numbers=None,
             url="https://example.com/page2.jpg",
         ),
         _MarvelPageSource(
-            number=2,
+            numbers=None,
             url="https://example.com/page3.jpg",
         ),
     ]
@@ -342,16 +342,16 @@ def test_get_pages(tmp_path, monkeypatch):
 
     sources = _MarvelPageSources(
         cover=_MarvelPageSource(
-            number=None,
+            numbers=(),
             url="https://example.com/page1",
         ),
         pages=[
             _MarvelPageSource(
-                number=1,
+                numbers=(1,),
                 url="https://example.com/page2",
             ),
             _MarvelPageSource(
-                number=2,
+                numbers=(2,),
                 url="https://example.com/page3",
             ),
         ],
@@ -359,7 +359,7 @@ def test_get_pages(tmp_path, monkeypatch):
 
     pages = adapter.get_pages("51975", sources)
 
-    assert pages.cover.number is None
+    assert pages.cover.numbers == ()
     assert pages.cover.width == 100
     assert pages.cover.height == 200
     assert pages.cover.content_type == "image/jpeg"
@@ -368,14 +368,14 @@ def test_get_pages(tmp_path, monkeypatch):
 
     assert len(pages.pages) == 2
 
-    assert pages.pages[0].number == 1
+    assert pages.pages[0].numbers == (1,)
     assert pages.pages[0].width == 300
     assert pages.pages[0].height == 400
     assert pages.pages[0].content_type == "image/jpeg"
     assert pages.pages[0].mode == "RGB"
     assert pages.pages[0].path.exists()
 
-    assert pages.pages[1].number == 2
+    assert pages.pages[1].numbers == (2,)
     assert pages.pages[1].width == 500
     assert pages.pages[1].height == 600
     assert pages.pages[1].content_type == "image/jpeg"
@@ -383,7 +383,8 @@ def test_get_pages(tmp_path, monkeypatch):
     assert pages.pages[1].path.exists()
 
 
-def test_get_clf(monkeypatch):
+@pytest.mark.parametrize("digital_format", ["print", "vertical", None])
+def test_get_clf(monkeypatch, digital_format):
     adapter = MarvelUnlimitedAdapter(client=httpx.Client())
 
     issue_data = _MarvelIssueData(
@@ -418,14 +419,17 @@ def test_get_clf(monkeypatch):
         },
     }
 
+    if digital_format is not None:
+        metadata["digital_format"] = digital_format
+
     page_sources = _MarvelPageSources(
         cover=_MarvelPageSource(
-            number=None,
+            numbers=(),
             url="https://example.com/cover.jpg",
         ),
         pages=[
             _MarvelPageSource(
-                number=1,
+                numbers=(1,),
                 url="https://example.com/page1.jpg",
             ),
         ],
@@ -433,7 +437,7 @@ def test_get_clf(monkeypatch):
 
     pages = Pages(
         cover=Page(
-            number=None,
+            numbers=(),
             path=Path("/tmp/cover.jpg"),
             width=1000,
             height=1500,
@@ -442,7 +446,7 @@ def test_get_clf(monkeypatch):
         ),
         pages=(
             Page(
-                number=1,
+                numbers=(1,),
                 path=Path("/tmp/page1.jpg"),
                 width=1000,
                 height=1500,
@@ -472,11 +476,12 @@ def test_get_clf(monkeypatch):
         "get_page_sources",
         lambda digital_id: page_sources,
     )
-    monkeypatch.setattr(
-        adapter,
-        "get_pages",
-        lambda digital_id, sources, progress=None: pages,
-    )
+
+    def get_pages(digital_id, sources, progress=None, *, infer_pagination=True):
+        assert infer_pagination is (digital_format != "vertical")
+        return pages
+
+    monkeypatch.setattr(adapter, "get_pages", get_pages)
 
     clf = adapter.get_clf("https://www.marvel.com/comics/issue/72984")
 
@@ -500,6 +505,47 @@ def test_get_clf(monkeypatch):
     )
 
     assert clf.pages is pages
-    assert clf.pages.cover.number is None
+    assert clf.pages.cover.numbers == ()
     assert len(clf.pages.pages) == 1
-    assert clf.pages.pages[0].number == 1
+    assert clf.pages.pages[0].numbers == (1,)
+
+
+def test_download_preserves_mappings_without_inferring_from_dimensions(tmp_path, monkeypatch):
+    # Includes a landscape single, portrait spread, unknown mapping, and gatefold.
+    mappings = [(17,), (18, 19), (), None, (20, 21, 22, 23)]
+    image_data = {}
+    for index, size in enumerate(
+        [(100, 150), (400, 100), (100, 150), (100, 150), (400, 100), (100, 150)]
+    ):
+        buffer = BytesIO()
+        Image.new("RGB", size).save(buffer, format="JPEG")
+        image_data[f"https://example.com/{index}"] = buffer.getvalue()
+
+    def handler(request):
+        return httpx.Response(
+            200, content=image_data[str(request.url)], headers={"Content-Type": "image/jpeg"}
+        )
+
+    monkeypatch.setattr("ucd.input.marvel_unlimited.WORK_PATH", tmp_path)
+    adapter = MarvelUnlimitedAdapter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    sources = _MarvelPageSources(
+        cover=_MarvelPageSource(numbers=(), url="https://example.com/0"),
+        pages=[
+            _MarvelPageSource(numbers=numbers, url=f"https://example.com/{i}")
+            for i, numbers in enumerate(mappings, start=1)
+        ],
+    )
+    progress = []
+    pages = adapter.get_pages(
+        "39895",
+        sources,
+        progress=lambda done, total: progress.append((done, total)),
+        infer_pagination=False,
+    )
+    assert [page.numbers for page in pages.pages] == mappings
+    assert pages.cover.numbers == ()
+    assert pages.logical_page_count is None
+    assert progress == [(i, 6) for i in range(7)]
+    for i, page in enumerate(pages.pages, start=1):
+        assert page.path.name.startswith(f"UCD-{i:05}-")
+        assert page.path.read_bytes() == image_data[f"https://example.com/{i}"]

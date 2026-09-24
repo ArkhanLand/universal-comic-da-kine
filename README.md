@@ -41,6 +41,13 @@ revisions rather than destroying previous state.
 See [docs/design.md](docs/design.md) for the current core design decisions
 and storage invariants.
 
+## Style conventions
+
+Wrap prose comments, docstrings, and Markdown prose at 77 columns, including
+indentation and comment markers. Preserve code blocks, tables, and unbreakable
+URLs or identifiers when wrapping would change their meaning. Python code
+continues to use the 100-column limit configured in `pyproject.toml`.
+
 ## Status
 
 Early development.
