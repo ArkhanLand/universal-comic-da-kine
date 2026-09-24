@@ -547,5 +547,5 @@ def test_download_preserves_mappings_without_inferring_from_dimensions(tmp_path,
     assert pages.logical_page_count is None
     assert progress == [(i, 6) for i in range(7)]
     for i, page in enumerate(pages.pages, start=1):
-        assert page.path.name.startswith(f"UCD-{i:05}-")
+        assert len(page.path.stem) == 64  # Content hash, independent of source order.
         assert page.path.read_bytes() == image_data[f"https://example.com/{i}"]

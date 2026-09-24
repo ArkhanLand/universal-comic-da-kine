@@ -2,21 +2,23 @@ import hashlib
 import json
 import mimetypes
 import re
-import shutil
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date
+from functools import partial
 from http.cookiejar import MozillaCookieJar
 from io import BytesIO
 from math import isclose
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from PIL import Image, ImageChops
 
+from ucd.download.images import ImageCache
 from ucd.exceptions import (
     IneligibleError,
     InvalidComicInputError,
@@ -38,6 +40,7 @@ COMICS_PATH = "/v1/catalog/digital-comics"
 METADATA_PATH = f"{COMICS_PATH}/metadata"
 ASSETS_PATH = f"{COMICS_PATH}/assets"
 WORK_PATH = "/tmp/ucd/marvel"
+CACHE_PATH = Path.home() / ".local" / "share" / "ucd" / "marvel"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,7 @@ class _MarvelIssueData:
 class _MarvelPageSource:
     numbers: tuple[int, ...] | None
     url: str
+    asset_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,8 +169,12 @@ class MarvelUnlimitedAdapter(InputAdapter):
         self,
         client: httpx.Client | None = None,
         cookie_file: Path | None = None,
+        *,
+        cache_dir: Path | None = None,
+        refresh: bool = False,
     ) -> None:
-        self.work_dirs: list[Path] = []
+        self.image_cache = ImageCache(cache_dir if cache_dir is not None else CACHE_PATH)
+        self.refresh = refresh
 
         if client is not None:
             self.client = client
@@ -299,17 +307,26 @@ class MarvelUnlimitedAdapter(InputAdapter):
             raise IneligibleError("Marvel Unlimited subscription required")
 
         try:
+            if not isinstance(pages, list) or not all(isinstance(page, dict) for page in pages):
+                raise ServiceResponseError("Marvel response contained invalid page asset data")
+            # Observed stable across repeated manifests despite URL rotation.
+            # Missing IDs fall back to URL-specific reuse, never sequence IDs.
+            identifiers = [str(page["id"]) for page in pages if page.get("id") is not None]
+            if len(set(identifiers)) != len(identifiers):
+                raise ServiceResponseError("Marvel response contained duplicate page IDs")
             # The first asset is treated as the cover. Asset sequence alone does
             # not establish logical pagination: an image may contain a spread.
             return _MarvelPageSources(
                 cover=_MarvelPageSource(
                     numbers=(),
                     url=pages[0]["assets"]["source"],
+                    asset_id=str(pages[0]["id"]) if pages[0].get("id") is not None else None,
                 ),
                 pages=list(
                     _MarvelPageSource(
                         numbers=None,
                         url=page["assets"]["source"],
+                        asset_id=str(page["id"]) if page.get("id") is not None else None,
                     )
                     for page in pages[1:]
                 ),
@@ -333,6 +350,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             raise ServiceResponseError(f"Unknown extension for image content type: {content_type}")
 
         with Image.open(BytesIO(response.content)) as img:
+            img.load()
             width, height = img.size
             mode = img.mode
 
@@ -358,58 +376,50 @@ class MarvelUnlimitedAdapter(InputAdapter):
         *,
         infer_pagination: bool = True,
     ) -> Pages:
-        work_dir = Path(WORK_PATH) / digital_id
-        work_dir.mkdir(parents=True, exist_ok=True)
-        self.work_dirs.append(work_dir)
-
-        total = len(page_sources.pages) + 1
-        completed = 0
+        if not digital_id.isdigit():
+            raise InvalidComicInputError("Invalid Digital ID")
+        sources = [page_sources.cover, *page_sources.pages]
+        total = len(sources)
         if progress is not None:
-            progress(completed, total)
-
-        url = page_sources.cover.url
-        filename = work_dir / f"UCD-cover-{self._source_hash(url)}"
-        cover_image = self._download_image(url, filename)
-        completed += 1
-        if progress is not None:
-            progress(completed, total)
-
-        cover_page = Page(
-            numbers=(),
-            path=cover_image.filename,
-            width=cover_image.width,
-            height=cover_image.height,
-            content_type=cover_image.content_type,
-            mode=cover_image.mode,
-        )
+            progress(0, total)
 
         page_list: list[Page] = []
-
-        for asset_index, page_source in enumerate(page_sources.pages, start=1):
-            filename = work_dir / f"UCD-{asset_index:05}-{self._source_hash(page_source.url)}"
-
-            image = self._download_image(page_source.url, filename)
-            page_list.append(
-                Page(
-                    numbers=page_source.numbers,
-                    path=image.filename,
-                    width=image.width,
-                    height=image.height,
-                    content_type=image.content_type,
-                    mode=image.mode,
+        Path(WORK_PATH).mkdir(parents=True, exist_ok=True)
+        # Scratch downloads are private to this call; CLF paths point to the
+        # persistent cache and survive cleanup or another adapter instance.
+        with TemporaryDirectory(dir=WORK_PATH) as temporary:
+            for index, source in enumerate(sources):
+                identity = (
+                    ["asset", source.asset_id]
+                    if source.asset_id is not None
+                    else ["url-sha256", self._source_hash(source.url)]
                 )
-            )
-            completed += 1
-            if progress is not None:
-                progress(completed, total)
+                key = json.dumps(["marvelUnlimited", digital_id, "source", identity])
+                filename = Path(temporary) / str(index)
+                image = self.image_cache.acquire(
+                    key,
+                    partial(self._download_image, source.url, filename),
+                    refresh=self.refresh,
+                )
+                page_list.append(
+                    Page(
+                        numbers=() if index == 0 else source.numbers,
+                        path=image.filename,
+                        width=image.width,
+                        height=image.height,
+                        content_type=image.content_type,
+                        mode=image.mode,
+                    )
+                )
+                if progress is not None:
+                    progress(index + 1, total)
 
-        pages = Pages(cover=cover_page, pages=tuple(page_list))
+        pages = Pages(cover=page_list[0], pages=tuple(page_list[1:]))
         return _infer_page_numbers(pages) if infer_pagination else pages
 
     def cleanup(self) -> None:
-        return
-        for path in self.work_dirs:
-            shutil.rmtree(path, ignore_errors=True)
+        # Original objects are persistent; temporary downloads clean themselves.
+        pass
 
     def get_clf(
         self,

@@ -37,7 +37,7 @@ class _ProgressBar:
         bar = "#" * filled + "-" * (self.width - filled)
         percent = int(ratio * 100)
         typer.echo(
-            f"\rDownloading {self._display_label(label)} [{bar}] {completed}/{total} {percent:3d}%",
+            f"\rAcquiring {self._display_label(label)} [{bar}] {completed}/{total} {percent:3d}%",
             nl=False,
         )
 
@@ -70,6 +70,11 @@ def download(
         False,
         "--overwrite",
     ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Fetch fresh image bytes even when locally cached; use --overwrite for existing CBZs.",
+    ),
     quit_on_error: bool = typer.Option(
         False,
         "--quit-on-error",
@@ -79,7 +84,7 @@ def download(
     """Download one or more Marvel Unlimited issues as CBZ files."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file)
+    adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file, refresh=refresh)
     progress = _ProgressBar()
     failures = 0
 

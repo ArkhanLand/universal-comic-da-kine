@@ -487,14 +487,50 @@ adapters to reopen that source archive.
 
 ### Acquisition timestamps
 
-Acquisition provenance should record a per-asset `fetched_at` timestamp
-marking successful download completion, expressed in UTC with fractional
-seconds (preserving the clock precision available). This is an acquisition
-timestamp, not the publication date or a source server modification time. It
-belongs to the acquisition record rather than immutable image identity:
-identical bytes fetched on different occasions share an image object but have
-distinct acquisition records. This timestamp is a future requirement and is
-not recorded by the current adapter.
+Acquisition provenance records a per-asset `fetched_at` timestamp marking
+successful download completion, expressed in UTC with fractional seconds
+(preserving the clock precision available). This is an acquisition timestamp,
+not the publication date or a source server modification time. It belongs to
+the acquisition record rather than immutable image identity: identical bytes
+fetched on different occasions share an image object but have distinct
+acquisition records. The Marvel image cache now records this information;
+general CLF provenance and export of these records remain future work.
+
+### Marvel image reuse
+
+The adapter retains exact image bytes in a persistent cache, separate from
+scratch downloads. The default location is `~/.local/share/ucd/marvel`;
+library callers can override it with `cache_dir`. Object filenames use SHA-256
+plus an image extension. Each fetch creates a versioned acquisition record
+with the object hash, provider asset identity, image attributes, and UTC fetch
+time. An asset lookup pointer selects the latest successful acquisition.
+Refresh retains older records and original objects; cleanup does not delete
+this persistent data.
+
+Two consecutive live asset requests for digital issue 39895 returned 18 unique
+page IDs unchanged while all 18 source URLs changed. This supports using the
+provider, digital issue ID, page ID, and source rendition as the reuse key;
+it does not establish a permanent provider guarantee. The observed response
+exposes no asset revision marker. Same-ID replacements or rendition changes
+therefore require explicit refresh. New IDs trigger downloads; reordering and
+removal follow the fresh manifest. Without an asset ID, reuse is restricted
+to the exact URL hash rather than guessing an identity from sequence position.
+Duplicate page IDs in a manifest are rejected as ambiguous.
+
+Each import still requests metadata and an authorized asset manifest. Cache
+hits verify the local object hash before reusing bytes, leave `fetched_at`
+unchanged, and count toward acquisition progress. Missing or corrupt objects
+or records trigger a download. Atomic writes publish objects and acquisition
+records before lookup pointers, so an interrupted fetch cannot publish an
+incomplete cache entry. Refresh operates per asset, not as an issue-wide
+transaction; successful fetches before a later failure remain available.
+
+`--refresh` bypasses image reuse. `--overwrite` separately controls replacement
+of an existing output CBZ; refresh does not bypass that protection. Existing
+URL-named scratch files lack verified identity mappings and acquisition times
+and are not automatically adopted. Full persistent CLF revisions, metadata
+preservation, cache garbage collection, and exported provenance remain
+separate work.
 
 ## PDF input normalization
 

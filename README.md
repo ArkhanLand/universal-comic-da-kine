@@ -41,9 +41,28 @@ revisions rather than destroying previous state.
 See [docs/design.md](docs/design.md) for the current core design decisions
 and storage invariants.
 
+## Reusing Marvel downloads
+
+Marvel image downloads are retained under `~/.local/share/ucd/marvel` and
+reused by digital issue ID, page ID, and source rendition, even when delivery
+URLs change. Metadata and the page manifest are still fetched on each import.
+Cached image bytes are checked against their SHA-256 hash before reuse.
+
+Use `ucd download SOURCE --refresh` to fetch fresh images. Add `--overwrite`
+if the destination CBZ already exists; `--overwrite` alone still reuses cached
+images. Refresh is needed for replacements or rendition changes that retain
+the same page ID, because Marvel's observed asset responses provide no
+revision marker. Older original bytes and acquisition records remain stored
+after refresh.
+
+Library callers can pass `cache_dir=Path(...)` and `refresh=True` to
+`MarvelUnlimitedAdapter`. Existing `/tmp/ucd/marvel` downloads are not
+migrated automatically because they lack verified identity mappings and fetch
+records.
+
 ## Style conventions
 
-Wrap prose comments, docstrings, and Markdown prose at 77 columns, including
+Wrap prose comments, docstrings, and Markdown prose at 78 columns, including
 indentation and comment markers. Preserve code blocks, tables, and unbreakable
 URLs or identifiers when wrapping would change their meaning. Python code
 continues to use the 100-column limit configured in `pyproject.toml`.
