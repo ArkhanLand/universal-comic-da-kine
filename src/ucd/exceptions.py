@@ -20,3 +20,7 @@ class IneligibleError(ComicDownloaderError):
 
 class ServiceResponseError(ComicDownloaderError):
     """A service returned an unexpected or malformed response."""
+
+
+class UnavailableError(ComicDownloaderError):
+    """The requested publication has no available source representation."""

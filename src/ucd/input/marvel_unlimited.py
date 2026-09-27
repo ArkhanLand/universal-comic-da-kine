@@ -23,6 +23,7 @@ from ucd.exceptions import (
     IneligibleError,
     InvalidComicInputError,
     ServiceResponseError,
+    UnavailableError,
 )
 from ucd.input.base import InputAdapter, MetadataCallback, ProgressCallback
 from ucd.models import CLF, Creator, DownloadedImageFile, Page, Pages
@@ -279,6 +280,10 @@ class MarvelUnlimitedAdapter(InputAdapter):
         url = BIFROST_BASE_URL + METADATA_PATH + f"/{digital_id}"
 
         response = self.client.get(url)
+        if response.status_code == 404:
+            raise UnavailableError(
+                f"No downloadable digital edition is available for Marvel digital ID {digital_id}"
+            )
         response.raise_for_status()
         data: dict[str, Any] = response.json()
 
@@ -294,6 +299,10 @@ class MarvelUnlimitedAdapter(InputAdapter):
         url = BIFROST_BASE_URL + ASSETS_PATH + f"/{digital_id}"
 
         response = self.client.get(url)
+        if response.status_code == 404:
+            raise UnavailableError(
+                f"No downloadable digital edition is available for Marvel digital ID {digital_id}"
+            )
         response.raise_for_status()
 
         try:
