@@ -3,7 +3,7 @@ from pathlib import Path
 from ucd.download.cache import Cache
 
 
-def test_cache_complete_marker(tmp_path: Path) -> None:
+def test_complete_marker(tmp_path: Path) -> None:
     cache = Cache(tmp_path)
     assert not cache.is_complete("example", "123")
     cache.prepare("example", "123")

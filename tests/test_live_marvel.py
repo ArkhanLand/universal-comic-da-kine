@@ -6,7 +6,7 @@ from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 
 
 @pytest.mark.network
-def test_marvel_live_get_issue_data() -> None:
+def test_issue_data() -> None:
     service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
     meta = service.get_issue_data("72984")
@@ -18,7 +18,7 @@ def test_marvel_live_get_issue_data() -> None:
 
 
 @pytest.mark.network
-def test_marvel_live_get_metadata() -> None:
+def test_metadata() -> None:
     """Test the web code that looks up live Marvel data"""
     service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
@@ -32,7 +32,7 @@ def test_marvel_live_get_metadata() -> None:
 
 
 @pytest.mark.network
-def test_marvel_live_get_page_sources() -> None:
+def test_page_sources() -> None:
     service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
     sources = service.get_page_sources("51975")
@@ -49,7 +49,7 @@ def test_marvel_live_get_page_sources() -> None:
 
 
 @pytest.mark.network
-def test_marvel_live_get_pages() -> None:
+def test_download_pages() -> None:
     service = MarvelUnlimitedAdapter(cookie_file=Path("cookies.txt"))
 
     digital_id = "51975"

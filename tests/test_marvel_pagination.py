@@ -37,8 +37,8 @@ def asset(
     )
 
 
-@pytest.mark.parametrize("border_color", [(0, 0, 0), (5, 5, 5)])
-def test_infer_single_double_and_gatefold_from_padded_assets(tmp_path, border_color):
+@pytest.mark.parametrize("border_color", [(0, 0, 0), (5, 5, 5)], ids=["black", "near-black"])
+def test_padded_spans(tmp_path, border_color):
     cover = replace(
         asset(tmp_path, "cover", (100, 150), border=10, border_color=border_color), numbers=()
     )
@@ -62,7 +62,7 @@ def test_infer_single_double_and_gatefold_from_padded_assets(tmp_path, border_co
     assert [p.path.read_bytes() for p in (cover, *pages.pages)] == originals
 
 
-def test_unknown_span_raises_and_explicit_override_resolves_it(tmp_path):
+def test_span_override(tmp_path):
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     single = asset(tmp_path, "single", (100, 150))
     ambiguous = asset(tmp_path, "wide", (267, 150))
@@ -74,7 +74,7 @@ def test_unknown_span_raises_and_explicit_override_resolves_it(tmp_path):
     assert [p.numbers for p in inferred.pages] == [(1,), (2, 3, 4), (5,)]
 
 
-def test_explicit_zero_and_landscape_single_override_inference(tmp_path):
+def test_explicit_spans(tmp_path):
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     wide = asset(tmp_path, "wide", (200, 150))
     pages = Pages(
@@ -89,7 +89,7 @@ def test_explicit_zero_and_landscape_single_override_inference(tmp_path):
     assert [p.numbers for p in inferred.pages] == [(), (17,), (18, 19)]
 
 
-def test_blank_asset_with_unmatched_dimensions_raises(tmp_path):
+def test_blank_rejected(tmp_path):
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     blank = asset(tmp_path, "blank", (267, 150))
     Image.new("RGB", (267, 150), "black").save(blank.path)
@@ -98,14 +98,14 @@ def test_blank_asset_with_unmatched_dimensions_raises(tmp_path):
         _infer_page_numbers(Pages(cover=cover, pages=(blank,)))
 
 
-def test_landscape_cover_does_not_establish_reference(tmp_path):
+def test_no_reference(tmp_path):
     cover = replace(asset(tmp_path, "cover", (200, 150)), numbers=())
     pages = Pages(cover=cover, pages=(asset(tmp_path, "wide", (400, 150)),))
     with pytest.raises(ValueError, match="wide.png.*no portrait single-page reference"):
         _infer_page_numbers(pages)
 
 
-def test_interior_black_gutter_is_not_removed(tmp_path):
+def test_retain_gutter(tmp_path):
     page = asset(tmp_path, "gutter", (200, 150))
     with Image.open(page.path) as image:
         ImageDraw.Draw(image).rectangle((95, 0, 105, 149), fill="black")
@@ -114,7 +114,7 @@ def test_interior_black_gutter_is_not_removed(tmp_path):
 
 
 @pytest.mark.parametrize("infer", [True, False])
-def test_download_inference_is_optional_and_progress_counts_assets(tmp_path, monkeypatch, infer):
+def test_inference_toggle(tmp_path, monkeypatch, infer):
     cover = asset(tmp_path, "cover", (100, 150))
     wide = asset(tmp_path, "wide", (400, 150), border=20)
     content = {"/cover": cover.path.read_bytes(), "/wide": wide.path.read_bytes()}
@@ -142,7 +142,7 @@ def test_download_inference_is_optional_and_progress_counts_assets(tmp_path, mon
     assert pages.pages[0].path.read_bytes() == content["/wide"]
 
 
-def test_jpeg_letterboxed_four_page_spread(tmp_path):
+def test_jpeg_gatefold(tmp_path):
     # Reproduce the observed dimensions without including publisher artwork.
     cover = asset(tmp_path, "cover", (975, 1500))
     wide = asset(tmp_path, "wide", (2601, 1500))
@@ -165,11 +165,11 @@ def test_jpeg_letterboxed_four_page_spread(tmp_path):
 @pytest.mark.parametrize(
     "multiple, expected", [(2.0, 2), (2.01, 2), (2.03, None), (3.89, None), (3.97, 4), (4.0, 4)]
 )
-def test_span_tolerance_is_one_percent(multiple, expected):
+def test_span_tolerance(multiple, expected):
     assert _inferred_span((round(1000 * multiple), 1500), (1000, 1500)) == expected
 
 
-def test_interior_dimensions_take_precedence_over_cover(tmp_path):
+def test_prefer_interior(tmp_path):
     cover = replace(asset(tmp_path, "cover", (100, 180)), numbers=())
     single = asset(tmp_path, "single", (100, 150))
     spread = asset(tmp_path, "spread", (200, 150))
@@ -178,7 +178,7 @@ def test_interior_dimensions_take_precedence_over_cover(tmp_path):
     assert [p.numbers for p in inferred.pages] == [(1,), (2, 3)]
 
 
-def test_white_margins_are_never_trimmed(tmp_path):
+def test_retain_white(tmp_path):
     page = asset(tmp_path, "white-paper", (400, 150), border=30, border_color=(255, 255, 255))
     assert _pagination_dimensions(page) == (460, 210)
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
@@ -186,7 +186,7 @@ def test_white_margins_are_never_trimmed(tmp_path):
         _infer_page_numbers(Pages(cover=cover, pages=(page,)))
 
 
-def test_black_padding_outside_white_paper_preserves_white(tmp_path):
+def test_black_padding(tmp_path):
     page = asset(tmp_path, "black-and-white", (100, 150), border=10, border_color=(255, 255, 255))
     with Image.open(page.path) as white_page:
         padded = Image.new("RGB", (140, 190), "black")

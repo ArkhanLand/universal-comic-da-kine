@@ -10,7 +10,7 @@ from ucd.input.marvel_unlimited import (
 )
 
 
-def test_get_pages_reports_progress(tmp_path, monkeypatch) -> None:
+def test_download_progress(tmp_path, monkeypatch) -> None:
     images: dict[str, bytes] = {}
 
     for number in range(1, 4):

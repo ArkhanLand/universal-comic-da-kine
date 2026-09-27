@@ -21,7 +21,7 @@ from ucd.input.marvel_unlimited import (
 from ucd.models import Creator, Page, Pages
 
 
-def test_matches_marvel_issue_url() -> None:
+def test_matches_url() -> None:
     """Test that my matches_url code is working"""
     service = MarvelUnlimitedAdapter()
 
@@ -46,15 +46,15 @@ def test_matches_marvel_issue_url() -> None:
         ("LOLWUT", InvalidComicInputError),
     ],
     ids=[
-        "Full URL w/comic title",
-        "Same as ^^^ without www",
-        "Trailing slash only",
-        "No trailing slash",
-        "Bare catalog_id",
-        "Service Response Error",
+        "full-url",
+        "no-www",
+        "slash",
+        "no-slash",
+        "bare-id",
+        "invalid",
     ],
 )
-def test_get_catalog_id(comic_input: str, expected: str) -> None:
+def test_catalog_id(comic_input: str, expected: str) -> None:
     """Test that get_catalog_id returns correct values"""
     service = MarvelUnlimitedAdapter()
 
@@ -92,11 +92,11 @@ window['__marvel-fitt__']={
         ("no digital id here", ServiceResponseError),
     ],
     ids=[
-        "digitalComicID found",
-        "digitalComicID missing",
+        "found",
+        "missing",
     ],
 )
-def test_get_issue_data(body: str, expected: str) -> None:
+def test_issue_data(body: str, expected: str) -> None:
     """Test the web code that looks up the digital id"""
     catalog_id = "72984"
     url = f"https://www.marvel.com/comics/issue/{catalog_id}"
@@ -149,11 +149,11 @@ meta_body = {
         ("no metadata here", InvalidComicInputError),
     ],
     ids=[
-        "Metadata found",
-        "invalid digital_id",
+        "found",
+        "invalid",
     ],
 )
-def test_get_metadata(digital_id: str, expected: dict[str, Any] | type[ValueError]) -> None:
+def test_metadata(digital_id: str, expected: dict[str, Any] | type[ValueError]) -> None:
     """Test getting metadata"""
 
     url = f"https://bifrost.marvel.com/v1/catalog/digital-comics/metadata/{digital_id}"
@@ -210,7 +210,7 @@ page_sources_body = {
 }
 
 
-def test_get_page_sources() -> None:
+def test_page_sources() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url).endswith("/51975")
         return httpx.Response(200, json=page_sources_body)
@@ -244,14 +244,14 @@ def test_get_page_sources() -> None:
         "Some other text",
     ],
 )
-def test_get_page_sources_invalid_digital_id(digital_id: str) -> None:
+def test_invalid_digital_id(digital_id: str) -> None:
     adapter = MarvelUnlimitedAdapter()
 
     with pytest.raises(InvalidComicInputError):
         adapter.get_page_sources(digital_id)
 
 
-def test_get_page_sources_http_error() -> None:
+def test_asset_http_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
@@ -262,7 +262,7 @@ def test_get_page_sources_http_error() -> None:
         adapter.get_page_sources("51975")
 
 
-def test_get_page_sources_requires_subscription():
+def test_subscription():
     body = {
         "data": {
             "results": [
@@ -316,7 +316,7 @@ def test_download_image(tmp_path, httpx_mock):
     assert result.mode == "RGB"
 
 
-def test_get_pages(tmp_path, monkeypatch):
+def test_download_pages(tmp_path, monkeypatch):
     images = {}
 
     for number, size in ((1, (100, 200)), (2, (300, 400)), (3, (500, 600))):
@@ -384,7 +384,7 @@ def test_get_pages(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("digital_format", ["print", "vertical", None])
-def test_get_publication(monkeypatch, digital_format):
+def test_publication(monkeypatch, digital_format):
     adapter = MarvelUnlimitedAdapter(client=httpx.Client())
 
     issue_data = _MarvelIssueData(
@@ -511,7 +511,7 @@ def test_get_publication(monkeypatch, digital_format):
     assert publication.narrative[0].numbers == (1,)
 
 
-def test_download_preserves_mappings_without_inferring_from_dimensions(tmp_path, monkeypatch):
+def test_explicit_mappings(tmp_path, monkeypatch):
     # Includes a landscape single, portrait spread, unknown mapping, and gatefold.
     mappings = [(17,), (18, 19), (), None, (20, 21, 22, 23)]
     image_data = {}
