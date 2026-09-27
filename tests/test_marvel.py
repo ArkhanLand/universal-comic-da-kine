@@ -384,7 +384,7 @@ def test_get_pages(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("digital_format", ["print", "vertical", None])
-def test_get_clf(monkeypatch, digital_format):
+def test_get_publication(monkeypatch, digital_format):
     adapter = MarvelUnlimitedAdapter(client=httpx.Client())
 
     issue_data = _MarvelIssueData(
@@ -483,31 +483,32 @@ def test_get_clf(monkeypatch, digital_format):
 
     monkeypatch.setattr(adapter, "get_pages", get_pages)
 
-    clf = adapter.get_clf("https://www.marvel.com/comics/issue/72984")
+    publication = adapter.get_publication("https://www.marvel.com/comics/issue/72984")
 
-    assert clf.service == "marvelUnlimited"
-    assert clf.service_id == "51975"
-    assert clf.title == "House of X (2019) #1"
-    assert clf.source_url == "https://www.marvel.com/comics/issue/72984"
-    assert clf.series == "House of X (2019)"
-    assert clf.issue_number == "1"
-    assert clf.service_series_id == "26338"
-    assert clf.publication_date == date(2019, 7, 24)
-    assert clf.publisher == "Marvel"
-    assert clf.description == "Test description"
-    assert clf.age_rating == "Rated T+"
-    assert clf.imprint is None
-    assert clf.thumbnail_url == "https://example.com/thumbnail.jpg"
+    assert publication.service == "marvelUnlimited"
+    assert publication.service_id == "51975"
+    assert publication.title == "House of X (2019) #1"
+    assert publication.source_url == "https://www.marvel.com/comics/issue/72984"
+    assert publication.series == "House of X (2019)"
+    assert publication.issue_number == "1"
+    assert publication.service_series_id == "26338"
+    assert publication.publication_date == date(2019, 7, 24)
+    assert publication.publisher == "Marvel"
+    assert publication.description == "Test description"
+    assert publication.age_rating == "Rated T+"
+    assert publication.imprint is None
+    assert publication.thumbnail_url == "https://example.com/thumbnail.jpg"
 
-    assert clf.creators == (
+    assert publication.creators == (
         Creator(name="Jonathan Hickman", role="writer"),
         Creator(name="Pepe Larraz", role="penciler"),
     )
 
-    assert clf.pages is pages
-    assert clf.pages.cover.numbers == ()
-    assert len(clf.pages.pages) == 1
-    assert clf.pages.pages[0].numbers == (1,)
+    assert publication.cover is pages.cover
+    assert publication.narrative is pages.pages
+    assert publication.cover.numbers == ()
+    assert len(publication.narrative) == 1
+    assert publication.narrative[0].numbers == (1,)
 
 
 def test_download_preserves_mappings_without_inferring_from_dimensions(tmp_path, monkeypatch):

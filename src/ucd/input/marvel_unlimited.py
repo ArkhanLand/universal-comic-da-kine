@@ -26,7 +26,7 @@ from ucd.exceptions import (
     UnavailableError,
 )
 from ucd.input.base import InputAdapter, MetadataCallback, ProgressCallback
-from ucd.models import CLF, Creator, DownloadedImageFile, Page, Pages
+from ucd.models import Creator, DownloadedImageFile, Page, Pages, Publication
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -193,13 +193,14 @@ class MarvelUnlimitedAdapter(InputAdapter):
             follow_redirects=True,
         )
 
-    def _build_clf(
+    def _build_publication(
         self,
         issue_data: _MarvelIssueData,
         metadata: dict[str, Any],
-        pages: Pages,
-    ) -> CLF:
-        return CLF(
+        cover: Page,
+        narrative: tuple[Page, ...],
+    ) -> Publication:
+        return Publication(
             service="marvelUnlimited",
             service_id=issue_data.digital_id,
             title=metadata["title"],
@@ -220,7 +221,8 @@ class MarvelUnlimitedAdapter(InputAdapter):
                 )
                 for creator in metadata["creators"]["extended_list"]
             ),
-            pages=pages,
+            cover=cover,
+            narrative=narrative,
         )
 
     def matches_url(self, url: str) -> bool:
@@ -287,7 +289,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
         response.raise_for_status()
         data: dict[str, Any] = response.json()
 
-        # Marvel-specific data. This needs to be turned into a CLF():
+        # Marvel-specific data. This needs to be turned into a Publication():
         meta: dict[str, Any] = data["data"]["results"][0]["issue_meta"]
 
         return meta
@@ -394,8 +396,8 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
         page_list: list[Page] = []
         Path(WORK_PATH).mkdir(parents=True, exist_ok=True)
-        # Scratch downloads are private to this call; CLF paths point to the
-        # persistent cache and survive cleanup or another adapter instance.
+        # Scratch downloads are private to this call. Publication paths point
+        # to the persistent cache and survive cleanup or another instance.
         with TemporaryDirectory(dir=WORK_PATH) as temporary:
             for index, source in enumerate(sources):
                 identity = (
@@ -430,12 +432,12 @@ class MarvelUnlimitedAdapter(InputAdapter):
         # Original objects are persistent; temporary downloads clean themselves.
         pass
 
-    def get_clf(
+    def get_publication(
         self,
         source: str,
         progress: ProgressCallback | None = None,
         metadata_ready: MetadataCallback | None = None,
-    ) -> CLF:
+    ) -> Publication:
         if not (self.matches_url(source) or source.isdigit()):
             raise InvalidComicInputError(f"Invalid Marvel comic input: {source}")
 
@@ -461,15 +463,16 @@ class MarvelUnlimitedAdapter(InputAdapter):
 
             page_progress = report_page_progress
 
-        pages = self.get_pages(
+        acquired = self.get_pages(
             issue_data.digital_id,
             page_sources,
             progress=page_progress,
             infer_pagination=metadata.get("digital_format", "print") == "print",
         )
 
-        return self._build_clf(
+        return self._build_publication(
             issue_data=issue_data,
             metadata=metadata,
-            pages=pages,
+            cover=acquired.cover,
+            narrative=acquired.pages,
         )

@@ -3,27 +3,35 @@
 The project name remains Universal Comic Da Kine / UCD. This roadmap records
 agreed architecture, not completed functionality or a release schedule.
 
-## Immediate model/API migration
+## Model/API naming migration
 
-Rename the in-memory `ucd.models.CLF` class to `Publication`, and coordinate
-`InputAdapter.get_clf()` with a `get_publication()` API. The current name
-spans the abstract contract, Marvel adapter, CLI, output
-annotations/serializers, fixture factories, and mocked adapters. A blind
-documentation-driven code replacement could break library callers and
-third-party subclasses.
+The in-memory class is now `ucd.models.Publication`, and input adapters use
+`InputAdapter.get_publication()`. The abstract contract, Marvel adapter, CLI,
+output functions, fixture factories, and mocked adapters use the new names.
 
-This documentation change deliberately leaves executable names unchanged. The
-immediate follow-up should choose and document either a compatibility
-alias/wrapper period or a pre-1.0 breaking migration, update all internal
-callers together, and run `make check`. Verify metadata, image-byte output,
-callbacks, and cache behavior remain unchanged. If aliases are chosen, test
-both entry points and subclass behavior. There is no persisted CLF serializer
-to migrate today; do not rename existing cache data or hashes for this change.
+This is a deliberate pre-beta breaking API change. Update imports of `CLF`
+to `Publication`, calls/overrides of `get_clf()` to `get_publication()`, and
+output keyword arguments from `clf=` to `publication=`. The internal Marvel
+builder is now `_build_publication()`. There are no compatibility aliases or
+deprecation wrappers; API compatibility is not promised before public beta.
 
-Keep this bounded name migration separate from implementing Object/Asset,
-logical Page/View separation, hash-based model references, and the repository.
-The current `Page` combines a local path, image properties, and zero/one/many/
-unknown logical mappings; retain those established semantics during migration.
+The old reading-content wrapper is unpacked into `Publication.cover: Page`
+and `Publication.narrative: tuple[Page, ...]`. Update constructors and
+`dataclasses.replace` calls accordingly. Iterate `publication.narrative`
+directly; the cover remains separate. Counts (`logical_page_count` and
+`interior_image_count`) and reading-content validation now belong to
+Publication. There is no `Publication.pages` compatibility accessor.
+The intermediate `Pages` acquisition result is not stored in Publication.
+
+These changes preserve logical pagination, metadata projections,
+callbacks, image bytes, and cache behavior. No persisted CLF
+serializer exists to migrate; existing cache data and hashes are unchanged.
+API compatibility policy does not relax preservation of existing stored data.
+
+Object/Asset implementation, logical Page/View separation, hash-based model
+references, and the general repository remain separate work. The current
+`Page` still combines a local path, image properties, and logical mappings
+that can be zero, one, many, or unknown.
 
 ## Repository and preservation work
 
@@ -44,7 +52,7 @@ guarantees.
 
 The issue bodies were reviewed while preparing this design. Their historical
 uses of CLF should be read as the normalized model, with Publication the
-target Python name. This file records scope corrections without rewriting
+Python name. This file records scope corrections without rewriting
 issue history or claiming their acceptance criteria have been implemented.
 
 | Issue | Alignment or required follow-up |

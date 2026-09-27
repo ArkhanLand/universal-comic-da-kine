@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 
-from ucd.models import CLF
+from ucd.models import Publication
 
 ROLE_MAP = {
     "writer": "Writer",
@@ -16,7 +16,7 @@ ROLE_MAP = {
 }
 
 # ComicInfo.xml uses a controlled AgeRating vocabulary. Keep source-native values in
-# the CLF and normalize only when serializing to this target format.
+# the Publication and normalize only when serializing to this target format.
 AGE_RATING_MAP = {
     "rated t": "Teen",
     "rated t+": "Teen",
@@ -38,39 +38,39 @@ def _comicinfo_age_rating(value: str | None) -> str | None:
 
 # Makes the XML structure "ComicInfo.xml", as defined in the CBZ standard
 # Returns a bytes object with the output from xml.etree.ElementTree.tostring()
-def make_comicinfo(clf: CLF) -> bytes:
+def make_comicinfo(publication: Publication) -> bytes:
     root = ET.Element("ComicInfo")
 
     def add(tag: str, value: object | None) -> None:
         if value is not None and str(value).strip():
             ET.SubElement(root, tag).text = str(value)
 
-    add("Title", clf.title)
-    add("Series", clf.series)
-    add("Number", clf.issue_number)
-    add("Count", clf.series_count)
-    add("Volume", clf.volume)
-    add("Summary", clf.description)
-    add("Publisher", clf.publisher)
-    add("Imprint", clf.imprint)
-    add("Genre", _join(clf.genres))
-    add("Tags", _join(clf.tags))
-    add("Web", clf.source_url)
-    add("PageCount", clf.pages.logical_page_count)
-    add("LanguageISO", clf.language)
-    add("AgeRating", _comicinfo_age_rating(clf.age_rating))
-    add("StoryArc", _join(clf.story_arcs))
-    add("Characters", _join(clf.characters))
-    add("Teams", _join(clf.teams))
-    add("Locations", _join(clf.locations))
+    add("Title", publication.title)
+    add("Series", publication.series)
+    add("Number", publication.issue_number)
+    add("Count", publication.series_count)
+    add("Volume", publication.volume)
+    add("Summary", publication.description)
+    add("Publisher", publication.publisher)
+    add("Imprint", publication.imprint)
+    add("Genre", _join(publication.genres))
+    add("Tags", _join(publication.tags))
+    add("Web", publication.source_url)
+    add("PageCount", publication.logical_page_count)
+    add("LanguageISO", publication.language)
+    add("AgeRating", _comicinfo_age_rating(publication.age_rating))
+    add("StoryArc", _join(publication.story_arcs))
+    add("Characters", _join(publication.characters))
+    add("Teams", _join(publication.teams))
+    add("Locations", _join(publication.locations))
 
-    if clf.publication_date:
-        add("Year", clf.publication_date.year)
-        add("Month", clf.publication_date.month)
-        add("Day", clf.publication_date.day)
+    if publication.publication_date:
+        add("Year", publication.publication_date.year)
+        add("Month", publication.publication_date.month)
+        add("Day", publication.publication_date.day)
 
     grouped: dict[str, list[str]] = {}
-    for creator in clf.creators:
+    for creator in publication.creators:
         tag = ROLE_MAP.get(creator.role.casefold())
         if tag:
             names = grouped.setdefault(tag, [])
@@ -80,12 +80,12 @@ def make_comicinfo(clf: CLF) -> bytes:
     for tag, names in grouped.items():
         add(tag, ", ".join(names))
 
-    if clf.reading_direction == "rtl":
+    if publication.reading_direction == "rtl":
         add("Manga", "YesAndRightToLeft")
 
     # Image indices address archive assets, including the cover at index zero.
     page_info = ET.SubElement(root, "Pages")
-    for index, page in enumerate((clf.pages.cover, *clf.pages.pages)):
+    for index, page in enumerate((publication.cover, *publication.narrative)):
         attributes = {"Image": str(index)}
         if index == 0:
             attributes["Type"] = "FrontCover"

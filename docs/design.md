@@ -8,15 +8,16 @@ should remain migratable and understandable as the project changes.
 ## Status and terminology
 
 This is the agreed target architecture, not a list of implemented features.
-The current code has a `CLF` dataclass, `InputAdapter.get_clf()`, path-backed
-pages, Marvel acquisition, a persistent Marvel image cache, and CBZ output. It
+The current code has a `Publication` dataclass,
+`InputAdapter.get_publication()`, path-backed pages, Marvel acquisition, a
+persistent Marvel image cache, and CBZ output. It
 does not yet implement the general UCD Repository or revision manifests. See
-[the migration roadmap](roadmap.md) for the immediate API migration and
+[the migration roadmap](roadmap.md) for API migration notes and
 [the adapter guide](adapters.md) for current extension points.
 
 The project remains **Universal Comic Da Kine (UCD)**. **CLF** remains useful
 as a theoretical term for the comic-like category/model; it does not name a
-file on disk or the Python class. The normalized in-memory class is to be
+file on disk or the Python class. The normalized in-memory class is
 called **Publication**. Code-shaped examples below describe that target unless
 explicitly labeled as current behavior.
 
@@ -166,15 +167,19 @@ entries does not rewrite their logical mappings or image objects. Download
 filenames and CBZ member names use image sequence indices, never logical
 numbers.
 
-The current `Pages` container keeps `cover` separate from interior `pages`.
-`Pages.interior_image_count` counts interior assets.
-`Pages.logical_page_count` sums their logical extents and excludes the cover;
+`Publication.cover` is a separate `Page`. `Publication.narrative` is an
+ordered tuple of interior `Page` objects, not a container holding the cover.
+Iterate directly with `for page in publication.narrative`.
+`Publication.interior_image_count` counts interior assets.
+`Publication.logical_page_count` sums their logical extents and excludes the
+cover;
 it returns `None` if any interior mapping is unknown. A cover-only publication
 has logical count zero. `Page.is_spread` is true for multiple logical pages,
 false for zero or one, and unknown for `None`. The core model never infers
 extent from dimensions; input adapters may apply a documented heuristic.
 
-`CLF.reading_direction` (`ltr`/`rtl`) and `CLF.first_page_side`
+`Publication.reading_direction` (`ltr`/`rtl`) and
+`Publication.first_page_side`
 (`left`/`right`) retain optional facing-page presentation metadata. Missing
 values remain unknown.
 
@@ -211,8 +216,8 @@ Unmatched ratios or a missing single-page reference raise `ValueError`,
 identifying the asset and requesting an explicit page-number mapping. Imports
 do not silently continue with incomplete inferred pagination. Explicit
 mappings always win, including `()` for non-counting assets. Callers can
-disable inference with `get_pages(..., infer_pagination=False)`. `get_clf()`
-disables it for an explicit non-print `digital_format` (such as vertical
+disable inference with `get_pages(..., infer_pagination=False)`.
+`get_publication()` disables it for an explicit non-print `digital_format` (such as vertical
 Infinity Comics); a missing format retains the print-import default. Progress
 counts downloaded images, including the cover. Divisibility by four is not a
 general publication invariant. An earlier version of the code assumed stapled
@@ -246,8 +251,8 @@ archives are untouched; new exports use the revised metadata semantics.
 
 ## Cover semantics
 
-The following is conceptual. Current code nests these fields in `Pages` and
-requires a cover; making the cover optional is future model work.
+The current model stores cover and narrative as separate fields. It requires
+a cover; making the cover optional remains future model work.
 
 A cover is itself a `Page`, but it is structurally separate from the narrative
 page sequence.
@@ -257,18 +262,18 @@ Conceptually:
 ```python
 @dataclass(frozen=True, slots=True)
 class Publication:
-    cover: Page | None
-    pages: tuple[Page, ...]
+    cover: Page
+    narrative: tuple[Page, ...]
 ```
 
 The invariants are:
 
 ```text
-cover      = publication cover, if present
-pages[0]   = first page of the reading experience
+cover          = publication cover
+narrative[0]   = first interior page of the reading experience
 ```
 
-A cover is never implicitly part of `pages`. An output adapter may explicitly
+A cover is never implicitly part of `narrative`. An output adapter may explicitly
 include the cover when the requested output calls for it.
 
 ## Image metadata
