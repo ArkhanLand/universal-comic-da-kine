@@ -6,18 +6,28 @@ interface. There is no stable plugin API or automatic plugin discovery yet.
 ## Current implementation
 
 `src/ucd/input/base.py` defines `InputAdapter` with `name`,
-`matches_url(url)`, and `get_clf(source, progress=None, metadata_ready=None)
--> CLF`. The progress callback takes `(label, completed, total)`; the metadata
-callback takes `(title, series, issue_number)`. Adapters must not depend on
-the CLI UI.
+`matches_url(url)`, and:
+
+```python
+get_publication(source, progress=None, metadata_ready=None) -> Publication
+```
+
+The progress callback takes `(label, completed, total)`; the metadata callback
+takes `(title, series, issue_number)`. Adapters must not depend on the CLI UI.
 
 `MarvelUnlimitedAdapter` is the sole concrete input. It acquires metadata and
 images, returns a complete model with local `Page.path` references, and offers
 `cleanup()` for its scratch state. Cleanup is not part of the base interface.
+The returned Publication has separate `cover: Page` and
+`narrative: tuple[Page, ...]` fields. Iterate the narrative directly; the cover
+is not one of its entries. Counts and logical-mapping validation belong to
+Publication. The adapter's intermediate `get_pages()` result still uses
+`Pages` during acquisition; it is unpacked when constructing Publication.
+
 The CLI directly constructs this adapter; implementing a subclass alone does
 not register it or route new source types to it.
 
-`src/ucd/output/cbz.py` supplies `write_cbz(clf, destination,
+`src/ucd/output/cbz.py` supplies `write_cbz(publication, destination,
 overwrite=False)` (with `overwrite` keyword-only). Outputs are functions, not
 subclasses of an output base class. ComicInfo and ComicBookInfo serializers
 project supported model metadata; CBZ writes source image bytes without
@@ -32,10 +42,10 @@ repository objects exist.
 
 ## Target contract
 
-The immediate name migration is `CLF` to `Publication` and `get_clf()` to
-`get_publication()`. [Migration work](roadmap.md) must update the abstract
-method, concrete adapters, CLI, serializers, test factories, and mocks
-together.
+The Python API uses `Publication` and `get_publication()` throughout the
+abstract adapter, Marvel implementation, CLI, and output functions. The former
+names have been removed without compatibility aliases; see the
+[migration notes](roadmap.md). The broader repository contract remains planned.
 
 The eventual input contract must:
 

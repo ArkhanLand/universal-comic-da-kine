@@ -1,6 +1,6 @@
 import json
 
-from ucd.models import CLF
+from ucd.models import Publication
 
 ROLE_MAP = {
     "writer": "Writer",
@@ -16,40 +16,40 @@ ROLE_MAP = {
 }
 
 
-def make_comicbookinfo(clf: CLF) -> bytes:
+def make_comicbookinfo(publication: Publication) -> bytes:
     info: dict[str, object] = {}
 
-    if clf.series:
-        info["series"] = clf.series
-    if clf.issue_number:
-        info["issue"] = clf.issue_number
-    if clf.series_count is not None:
-        info["numberOfIssues"] = clf.series_count
-    if clf.publisher:
-        info["publisher"] = clf.publisher
-    if clf.language:
-        info["language"] = clf.language
+    if publication.series:
+        info["series"] = publication.series
+    if publication.issue_number:
+        info["issue"] = publication.issue_number
+    if publication.series_count is not None:
+        info["numberOfIssues"] = publication.series_count
+    if publication.publisher:
+        info["publisher"] = publication.publisher
+    if publication.language:
+        info["language"] = publication.language
         # Calibre tests for presence of "language" then reads "lang"
-        info["lang"] = clf.language
-    if clf.description:
-        info["comments"] = clf.description
-    if clf.genres:
-        info["genre"] = ", ".join(clf.genres)
-    if clf.tags:
-        info["tags"] = list(clf.tags)
-    if clf.title:
-        info["title"] = clf.title
+        info["lang"] = publication.language
+    if publication.description:
+        info["comments"] = publication.description
+    if publication.genres:
+        info["genre"] = ", ".join(publication.genres)
+    if publication.tags:
+        info["tags"] = list(publication.tags)
+    if publication.title:
+        info["title"] = publication.title
 
-    if clf.publication_date is not None:
-        info["publicationMonth"] = clf.publication_date.month
-        info["publicationYear"] = clf.publication_date.year
+    if publication.publication_date is not None:
+        info["publicationMonth"] = publication.publication_date.month
+        info["publicationYear"] = publication.publication_date.year
 
     credits = [
         {
             "person": creator.name,
             "role": ROLE_MAP.get(creator.role.casefold(), creator.role),
         }
-        for creator in clf.creators
+        for creator in publication.creators
     ]
 
     if credits:

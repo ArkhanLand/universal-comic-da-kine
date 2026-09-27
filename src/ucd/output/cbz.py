@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
-from ucd.models import CLF
+from ucd.models import Publication
 from ucd.output.comicbookinfo import make_comicbookinfo
 from ucd.output.comicinfo import make_comicinfo
 
@@ -37,16 +37,16 @@ def make_cbz_filename_from_metadata(
     return _sanitize_filename(name) + ".cbz"
 
 
-def make_cbz_filename(clf: CLF) -> str:
+def make_cbz_filename(publication: Publication) -> str:
     return make_cbz_filename_from_metadata(
-        clf.title,
-        clf.series,
-        clf.issue_number,
+        publication.title,
+        publication.series,
+        publication.issue_number,
     )
 
 
 def write_cbz(
-    clf: CLF,
+    publication: Publication,
     destination: Path,
     *,
     overwrite: bool = False,
@@ -54,7 +54,7 @@ def write_cbz(
     if destination.exists() and not overwrite:
         raise FileExistsError(destination)
 
-    comment = make_comicbookinfo(clf)
+    comment = make_comicbookinfo(publication)
 
     if len(comment) > ZIP_COMMENT_MAX:
         raise ValueError(
@@ -66,14 +66,14 @@ def write_cbz(
 
     with ZipFile(destination, "w", compression=ZIP_STORED) as archive:
         archive.comment = comment
-        archive.writestr("ComicInfo.xml", make_comicinfo(clf))
+        archive.writestr("ComicInfo.xml", make_comicinfo(publication))
 
         archive.write(
-            clf.pages.cover.path,
-            arcname=f"00000{clf.pages.cover.path.suffix}",
+            publication.cover.path,
+            arcname=f"00000{publication.cover.path.suffix}",
         )
 
-        for asset_index, page in enumerate(clf.pages.pages, start=1):
+        for asset_index, page in enumerate(publication.narrative, start=1):
             archive.write(
                 page.path,
                 arcname=f"{asset_index:05}{page.path.suffix}",

@@ -3,14 +3,14 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
-from tests.helpers import make_test_clf
+from tests.helpers import make_test_publication
 from ucd.models import Creator
 from ucd.output.comicinfo import make_comicinfo
 
 
 def test_comicinfo_contains_metadata(tmp_path: Path) -> None:
-    clf = replace(
-        make_test_clf(tmp_path),
+    publication = replace(
+        make_test_publication(tmp_path),
         source_url="https://example.com/comic/1",
         series="Example",
         issue_number="1",
@@ -35,7 +35,7 @@ def test_comicinfo_contains_metadata(tmp_path: Path) -> None:
         ),
     )
 
-    root = ET.fromstring(make_comicinfo(clf))
+    root = ET.fromstring(make_comicinfo(publication))
 
     def value(tag: str) -> str | None:
         element = root.find(tag)
@@ -68,21 +68,18 @@ def test_comicinfo_contains_metadata(tmp_path: Path) -> None:
 
 
 def test_comicinfo_counts_logical_pages_and_indexes_images(tmp_path: Path) -> None:
-    clf = make_test_clf(tmp_path)
-    page = clf.pages.pages[0]
-    clf = replace(
-        clf,
-        pages=replace(
-            clf.pages,
-            pages=(
-                replace(page, numbers=()),
-                replace(page, numbers=(17,), width=9000),
-                replace(page, numbers=(18, 19)),
-                replace(page, numbers=(20, 21, 22, 23)),
-            ),
+    publication = make_test_publication(tmp_path)
+    page = publication.narrative[0]
+    publication = replace(
+        publication,
+        narrative=(
+            replace(page, numbers=()),
+            replace(page, numbers=(17,), width=9000),
+            replace(page, numbers=(18, 19)),
+            replace(page, numbers=(20, 21, 22, 23)),
         ),
     )
-    root = ET.fromstring(make_comicinfo(clf))
+    root = ET.fromstring(make_comicinfo(publication))
     assert root.findtext("PageCount") == "7"
     entries = root.findall("Pages/Page")
     assert [entry.get("Image") for entry in entries] == ["0", "1", "2", "3", "4"]
@@ -97,24 +94,27 @@ def test_comicinfo_counts_logical_pages_and_indexes_images(tmp_path: Path) -> No
 
 
 def test_comicinfo_omits_unknown_count_and_span(tmp_path: Path) -> None:
-    clf = make_test_clf(tmp_path)
-    clf = replace(clf, pages=replace(clf.pages, pages=(replace(clf.pages.pages[0], numbers=None),)))
-    root = ET.fromstring(make_comicinfo(clf))
+    publication = make_test_publication(tmp_path)
+    publication = replace(
+        publication,
+        narrative=(replace(publication.narrative[0], numbers=None),),
+    )
+    root = ET.fromstring(make_comicinfo(publication))
     assert root.find("PageCount") is None
     assert root.findall("Pages/Page")[1].get("DoublePage") is None
 
 
 def test_comicinfo_cover_only_has_zero_publication_pages(tmp_path: Path) -> None:
-    clf = make_test_clf(tmp_path)
-    clf = replace(clf, pages=replace(clf.pages, pages=()))
-    root = ET.fromstring(make_comicinfo(clf))
+    publication = make_test_publication(tmp_path)
+    publication = replace(publication, narrative=())
+    root = ET.fromstring(make_comicinfo(publication))
     assert root.findtext("PageCount") == "0"
     assert len(root.findall("Pages/Page")) == 1
 
 
 def test_comicinfo_preserves_known_rtl_direction(tmp_path: Path) -> None:
-    clf = make_test_clf(tmp_path)
-    assert ET.fromstring(make_comicinfo(clf)).find("Manga") is None
-    rtl = replace(clf, reading_direction="rtl", first_page_side="left")
+    publication = make_test_publication(tmp_path)
+    assert ET.fromstring(make_comicinfo(publication)).find("Manga") is None
+    rtl = replace(publication, reading_direction="rtl", first_page_side="left")
     assert ET.fromstring(make_comicinfo(rtl)).findtext("Manga") == "YesAndRightToLeft"
     assert rtl.first_page_side == "left"

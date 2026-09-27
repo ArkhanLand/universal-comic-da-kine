@@ -105,14 +105,14 @@ def download(
         for source in sources:
             progress.reset()
             try:
-                clf = adapter.get_clf(
+                publication = adapter.get_publication(
                     source,
                     progress=progress.update,
                     metadata_ready=check_destination,
                 )
-                destination = output_dir / make_cbz_filename(clf)
+                destination = output_dir / make_cbz_filename(publication)
                 write_cbz(
-                    clf,
+                    publication,
                     destination,
                     overwrite=overwrite,
                 )

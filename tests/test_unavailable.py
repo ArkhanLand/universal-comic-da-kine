@@ -2,7 +2,7 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from tests.helpers import make_test_clf
+from tests.helpers import make_test_publication
 from ucd.cli import app
 from ucd.exceptions import ComicDownloaderError, UnavailableError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
@@ -46,18 +46,18 @@ def test_catalog_404_is_not_digital_edition_unavailability():
 def test_cli_unavailable_batch(tmp_path, monkeypatch, quit_on_error):
     calls = []
     cleaned = []
-    clf = make_test_clf(tmp_path)
+    publication = make_test_publication(tmp_path)
 
     class Adapter:
         def __init__(self, **kwargs):
             pass
 
-        def get_clf(self, source, progress, metadata_ready):
+        def get_publication(self, source, progress, metadata_ready):
             calls.append(source)
             if source == "1":
                 raise UnavailableError("No downloadable digital edition is available for ID 1")
-            metadata_ready(clf.title, clf.series, clf.issue_number)
-            return clf
+            metadata_ready(publication.title, publication.series, publication.issue_number)
+            return publication
 
         def cleanup(self):
             cleaned.append(True)

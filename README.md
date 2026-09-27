@@ -81,10 +81,10 @@ Input adapters -> Publication -> Transformations -> Output adapters
                history + object storage
 ```
 
-CLF remains a theoretical term for the comic-like category/model. The current
-Python class and method are still `CLF` and `get_clf()`; their immediate
-migration to `Publication` and `get_publication()` is documented in the
-[roadmap](docs/roadmap.md). This is not a persistent "CLF file."
+CLF remains a theoretical term for the comic-like category/model. The Python
+class is `Publication`, and input adapters return it through
+`get_publication()`. This is not a persistent "CLF file." See the
+[roadmap](docs/roadmap.md) for migration notes and remaining architecture work.
 
 In the target design, immutable objects are identified by hashes, independent
 of filenames and formats. Source bytes remain intact; derived assets record

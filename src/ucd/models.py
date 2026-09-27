@@ -79,16 +79,18 @@ class DownloadedImageFile:
     mode: str
 
 
-# Comic-Like File. The internal UCD representation of the entire publication, including metadata
 @dataclass(frozen=True, slots=True)
-class CLF:
+class Publication:
+    """Normalized in-memory publication, including pages and metadata."""
+
     service: str
     service_id: str
     service_series_id: str
     title: str
 
-    # Downloadable content
-    pages: Pages
+    # Cover is separate from the ordered narrative reading sequence.
+    cover: Page
+    narrative: tuple[Page, ...]
 
     source_url: str | None = None
 
@@ -123,3 +125,30 @@ class CLF:
 
     # Credits
     creators: tuple[Creator, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.cover.numbers != ():
+            raise ValueError("The cover must have no logical page numbers: ()")
+        seen: set[int] = set()
+        for page in self.narrative:
+            if page.numbers is not None:
+                if seen.intersection(page.numbers):
+                    raise ValueError("Logical page numbers must be unique across images")
+                seen.update(page.numbers)
+
+    @property
+    def logical_page_count(self) -> int | None:
+        """Count logical pages present in this edition, excluding the cover.
+
+        Omitted print material is not counted. Unknown if any mapping is unknown.
+        """
+        total = 0
+        for page in self.narrative:
+            if page.numbers is None:
+                return None
+            total += len(page.numbers)
+        return total
+
+    @property
+    def interior_image_count(self) -> int:
+        return len(self.narrative)

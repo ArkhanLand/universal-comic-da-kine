@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 from typer.testing import CliRunner
 
-from tests.helpers import make_test_clf
+from tests.helpers import make_test_publication
 from ucd.cli import app
 from ucd.exceptions import ServiceResponseError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
@@ -90,9 +90,9 @@ def test_rotating_urls_reuse_across_instances_and_export(tmp_path):
         assert timestamp.utcoffset().total_seconds() == 0
         assert "." in record["fetched_at"]
         assert "https://" not in json.dumps(record)
-    clf = make_test_clf(tmp_path)
+    publication = make_test_publication(tmp_path)
     destination = tmp_path / "cached.cbz"
-    write_cbz(replace(clf, pages=second), destination)
+    write_cbz(replace(publication, cover=second.cover, narrative=second.pages), destination)
     with ZipFile(destination) as archive:
         assert archive.read("00001.png") == server.images["one"]
         assert archive.read("00002.png") == server.images["two"]
@@ -185,15 +185,15 @@ def test_duplicate_ids_rejected(tmp_path):
 
 def test_cli_refresh_is_independent_of_overwrite(tmp_path, monkeypatch):
     observed = []
-    clf = make_test_clf(tmp_path)
+    publication = make_test_publication(tmp_path)
 
     class Adapter:
         def __init__(self, *, cookie_file, refresh):
             observed.append(refresh)
 
-        def get_clf(self, source, progress, metadata_ready):
-            metadata_ready(clf.title, clf.series, clf.issue_number)
-            return clf
+        def get_publication(self, source, progress, metadata_ready):
+            metadata_ready(publication.title, publication.series, publication.issue_number)
+            return publication
 
         def cleanup(self):
             pass
