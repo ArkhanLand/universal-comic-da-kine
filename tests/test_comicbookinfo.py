@@ -11,7 +11,7 @@ from ucd.output.cbz import write_cbz
 from ucd.output.comicbookinfo import make_comicbookinfo
 
 
-def test_comicbookinfo_contains_metadata(tmp_path: Path) -> None:
+def test_metadata(tmp_path: Path) -> None:
     publication = replace(
         make_test_publication(tmp_path),
         series="Example Series",
@@ -62,7 +62,7 @@ def test_comicbookinfo_contains_metadata(tmp_path: Path) -> None:
     ]
 
 
-def test_cbz_rejects_oversized_comicbookinfo_comment(
+def test_oversized_comment(
     tmp_path: Path,
 ) -> None:
     publication = replace(

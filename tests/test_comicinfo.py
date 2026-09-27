@@ -8,7 +8,7 @@ from ucd.models import Creator
 from ucd.output.comicinfo import make_comicinfo
 
 
-def test_comicinfo_contains_metadata(tmp_path: Path) -> None:
+def test_metadata(tmp_path: Path) -> None:
     publication = replace(
         make_test_publication(tmp_path),
         source_url="https://example.com/comic/1",
@@ -67,7 +67,7 @@ def test_comicinfo_contains_metadata(tmp_path: Path) -> None:
     assert value("CoverArtist") == "Casey Cover"
 
 
-def test_comicinfo_counts_logical_pages_and_indexes_images(tmp_path: Path) -> None:
+def test_page_mapping(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     page = publication.narrative[0]
     publication = replace(
@@ -93,7 +93,7 @@ def test_comicinfo_counts_logical_pages_and_indexes_images(tmp_path: Path) -> No
     ]
 
 
-def test_comicinfo_omits_unknown_count_and_span(tmp_path: Path) -> None:
+def test_unknown_count(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     publication = replace(
         publication,
@@ -104,7 +104,7 @@ def test_comicinfo_omits_unknown_count_and_span(tmp_path: Path) -> None:
     assert root.findall("Pages/Page")[1].get("DoublePage") is None
 
 
-def test_comicinfo_cover_only_has_zero_publication_pages(tmp_path: Path) -> None:
+def test_cover_only(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     publication = replace(publication, narrative=())
     root = ET.fromstring(make_comicinfo(publication))
@@ -112,7 +112,7 @@ def test_comicinfo_cover_only_has_zero_publication_pages(tmp_path: Path) -> None
     assert len(root.findall("Pages/Page")) == 1
 
 
-def test_comicinfo_preserves_known_rtl_direction(tmp_path: Path) -> None:
+def test_reading_direction(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     assert ET.fromstring(make_comicinfo(publication)).find("Manga") is None
     rtl = replace(publication, reading_direction="rtl", first_page_side="left")

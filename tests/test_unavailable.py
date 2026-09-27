@@ -11,9 +11,10 @@ from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 @pytest.mark.parametrize(
     ("method", "endpoint"),
     [("get_metadata", "metadata"), ("get_page_sources", "assets")],
+    ids=["metadata", "assets"],
 )
 @pytest.mark.parametrize("status", [404, 401, 403, 429, 500])
-def test_bifrost_unavailability(method, endpoint, status):
+def test_bifrost_status(method, endpoint, status):
     def handler(request):
         assert str(request.url) == (
             f"https://bifrost.marvel.com/v1/catalog/digital-comics/{endpoint}/51975"
@@ -35,7 +36,7 @@ def test_bifrost_unavailability(method, endpoint, status):
             assert exc.value.response.status_code == status
 
 
-def test_catalog_404_is_not_digital_edition_unavailability():
+def test_catalog_404():
     with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404))) as client:
         adapter = MarvelUnlimitedAdapter(client=client)
         with pytest.raises(httpx.HTTPStatusError):
@@ -43,7 +44,7 @@ def test_catalog_404_is_not_digital_edition_unavailability():
 
 
 @pytest.mark.parametrize("quit_on_error", [False, True])
-def test_cli_unavailable_batch(tmp_path, monkeypatch, quit_on_error):
+def test_cli_batch(tmp_path, monkeypatch, quit_on_error):
     calls = []
     cleaned = []
     publication = make_test_publication(tmp_path)

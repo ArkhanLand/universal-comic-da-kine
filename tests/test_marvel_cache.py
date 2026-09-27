@@ -73,7 +73,7 @@ def records(root):
     return [json.loads(p.read_text()) for p in (root / "acquisitions").glob("*.json")]
 
 
-def test_rotating_urls_reuse_across_instances_and_export(tmp_path):
+def test_reuse_and_export(tmp_path):
     server = MarvelServer()
     root = tmp_path / "cache"
     first = acquire(server.adapter(root))
@@ -98,7 +98,7 @@ def test_rotating_urls_reuse_across_instances_and_export(tmp_path):
         assert archive.read("00002.png") == server.images["two"]
 
 
-def test_reorder_insert_and_changed_identity(tmp_path):
+def test_manifest_changes(tmp_path):
     server = MarvelServer()
     first = acquire(server.adapter(tmp_path))
     server.images["new"] = image_bytes("yellow")
@@ -113,7 +113,7 @@ def test_reorder_insert_and_changed_identity(tmp_path):
     assert len(acquire(server.adapter(tmp_path)).pages) == 1
 
 
-def test_same_id_replacement_requires_refresh_and_preserves_original(tmp_path):
+def test_refresh_original(tmp_path):
     server = MarvelServer()
     first = acquire(server.adapter(tmp_path))
     old_bytes = first.pages[0].path.read_bytes()
@@ -127,7 +127,7 @@ def test_same_id_replacement_requires_refresh_and_preserves_original(tmp_path):
 
 
 @pytest.mark.parametrize("damage", ["missing", "corrupt", "record"])
-def test_bad_local_state_is_recovered(tmp_path, damage):
+def test_recover_cache(tmp_path, damage):
     server = MarvelServer()
     first = acquire(server.adapter(tmp_path))
     target = first.pages[0].path
@@ -144,7 +144,7 @@ def test_bad_local_state_is_recovered(tmp_path, damage):
     assert recovered.pages[0].path.read_bytes() == server.images["one"]
 
 
-def test_failed_refresh_keeps_previous_acquisition(tmp_path):
+def test_failed_refresh(tmp_path):
     server = MarvelServer()
     first = acquire(server.adapter(tmp_path))
     server.fail = "one"
@@ -155,7 +155,7 @@ def test_failed_refresh_keeps_previous_acquisition(tmp_path):
     assert server.downloads == downloads
 
 
-def test_asset_ids_are_scoped_to_issue(tmp_path):
+def test_issue_scoping(tmp_path):
     server = MarvelServer()
     acquire(server.adapter(tmp_path), "1")
     server.images["one"] = image_bytes("purple")
@@ -164,7 +164,7 @@ def test_asset_ids_are_scoped_to_issue(tmp_path):
     assert second.pages[0].path.read_bytes() == server.images["one"]
 
 
-def test_missing_ids_do_not_reuse_by_sequence(tmp_path):
+def test_missing_ids(tmp_path):
     server = MarvelServer()
     server.omit_ids = True
     acquire(server.adapter(tmp_path))
@@ -175,7 +175,7 @@ def test_missing_ids_do_not_reuse_by_sequence(tmp_path):
     assert len(server.downloads) == 6
 
 
-def test_duplicate_ids_rejected(tmp_path):
+def test_duplicate_ids(tmp_path):
     server = MarvelServer()
     server.order = ["cover", "one", "one"]
     with pytest.raises(ServiceResponseError, match="duplicate page IDs"):
@@ -183,7 +183,7 @@ def test_duplicate_ids_rejected(tmp_path):
     assert not server.downloads
 
 
-def test_cli_refresh_is_independent_of_overwrite(tmp_path, monkeypatch):
+def test_refresh_overwrite(tmp_path, monkeypatch):
     observed = []
     publication = make_test_publication(tmp_path)
 
@@ -207,7 +207,7 @@ def test_cli_refresh_is_independent_of_overwrite(tmp_path, monkeypatch):
     assert observed == [False, True, True]
 
 
-def test_interrupted_first_import_resumes_successful_assets(tmp_path):
+def test_resume_import(tmp_path):
     server = MarvelServer()
     server.fail = "two"
     with pytest.raises(httpx.HTTPStatusError):
@@ -221,7 +221,7 @@ def test_interrupted_first_import_resumes_successful_assets(tmp_path):
     assert len(records(tmp_path)) == 3
 
 
-def test_invalid_image_does_not_replace_cached_original(tmp_path):
+def test_invalid_image(tmp_path):
     server = MarvelServer()
     first = acquire(server.adapter(tmp_path))
     server.images["cover"] = b"not a PNG"

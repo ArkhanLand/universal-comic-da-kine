@@ -14,7 +14,7 @@ from ucd.output.cbz import (
 )
 
 
-def test_cbz_filename_uses_authoritative_series_and_issue(tmp_path: Path) -> None:
+def test_filename_metadata(tmp_path: Path) -> None:
     publication = replace(
         make_test_publication(tmp_path),
         series="House Of X (2019)",
@@ -25,7 +25,7 @@ def test_cbz_filename_uses_authoritative_series_and_issue(tmp_path: Path) -> Non
     assert make_cbz_filename(publication) == "House Of X (2019) #1.cbz"
 
 
-def test_cbz_filename_preserves_series_variant(tmp_path: Path) -> None:
+def test_filename_variant(tmp_path: Path) -> None:
     publication = replace(
         make_test_publication(tmp_path),
         series="The Unbeatable Squirrel Girl (2015B)",
@@ -36,7 +36,7 @@ def test_cbz_filename_preserves_series_variant(tmp_path: Path) -> None:
     assert make_cbz_filename(publication) == "The Unbeatable Squirrel Girl (2015B) #1.cbz"
 
 
-def test_cbz_filename_sanitizes_colon_and_slash(tmp_path: Path) -> None:
+def test_filename_sanitize(tmp_path: Path) -> None:
     publication = replace(
         make_test_publication(tmp_path),
         series="Example: Alpha/Beta",
@@ -47,7 +47,7 @@ def test_cbz_filename_sanitizes_colon_and_slash(tmp_path: Path) -> None:
     assert make_cbz_filename(publication) == "Example_ Alpha_Beta #7.cbz"
 
 
-def test_cbz_filename_can_be_generated_before_pages() -> None:
+def test_filename_early() -> None:
     assert (
         make_cbz_filename_from_metadata(
             "House Of X (2019) #1",
@@ -58,7 +58,7 @@ def test_cbz_filename_can_be_generated_before_pages() -> None:
     )
 
 
-def test_cbz_contains_metadata_cover_and_pages(tmp_path: Path) -> None:
+def test_archive_content(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
 
     destination = tmp_path / "example.cbz"
@@ -77,7 +77,7 @@ def test_cbz_contains_metadata_cover_and_pages(tmp_path: Path) -> None:
         assert archive.read("00002.jpg") == b"page2"
 
 
-def test_cbz_refuses_to_overwrite(tmp_path: Path) -> None:
+def test_reject_overwrite(tmp_path: Path) -> None:
     destination = tmp_path / "example.cbz"
     destination.write_bytes(b"existing")
 
@@ -87,7 +87,7 @@ def test_cbz_refuses_to_overwrite(tmp_path: Path) -> None:
         write_cbz(publication, destination)
 
 
-def test_cbz_overwrites_when_requested(tmp_path: Path) -> None:
+def test_allow_overwrite(tmp_path: Path) -> None:
     destination = tmp_path / "example.cbz"
     destination.write_bytes(b"existing")
 
@@ -105,66 +105,66 @@ def test_cbz_overwrites_when_requested(tmp_path: Path) -> None:
         pytest.param(
             "Doctor Strange (2022-2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range Hyphen 1",
+            id="hyphen-1",
         ),
         pytest.param(
             "Doctor Strange (2022 - 2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range Hyphen 2",
+            id="hyphen-2",
         ),
         pytest.param(
             "Doctor Strange (2022- 2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range Hyphen 3",
+            id="hyphen-3",
         ),
         pytest.param(
             "Doctor Strange (2022 -2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range Hyphen 4",
+            id="hyphen-4",
         ),
         pytest.param(
             "Doctor Strange (2022–2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range en dash 1",
+            id="en-1",
         ),
         pytest.param(
             "Doctor Strange (2022– 2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range en dash 2",
+            id="en-2",
         ),
         pytest.param(
             "Doctor Strange (2022 –2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range en dash 3",
+            id="en-3",
         ),
         pytest.param(
             "Doctor Strange (2022 – 2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range en dash 4",
+            id="en-4",
         ),
         pytest.param(
             "Doctor Strange (2022—2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range em dash 1",
+            id="em-1",
         ),
         pytest.param(
             "Doctor Strange (2022— 2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range em dash 2",
+            id="em-2",
         ),
         pytest.param(
             "Doctor Strange (2022 —2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range em dash 3",
+            id="em-3",
         ),
         pytest.param(
             "Doctor Strange (2022 — 2024)",
             "Doctor Strange (2022–2024) #1.cbz",
-            id="Date Range em dash 4",
+            id="em-4",
         ),
     ],
 )
-def test_cbz_filename_year_ranges(
+def test_year_ranges(
     series: str,
     expected: str,
 ) -> None:
@@ -178,7 +178,7 @@ def test_cbz_filename_year_ranges(
     )
 
 
-def test_cbz_filename_does_not_normalize_non_year_dashes() -> None:
+def test_retain_other_dashes() -> None:
     assert (
         make_cbz_filename_from_metadata(
             "Spider-Man - Deadpool #1",
@@ -189,7 +189,7 @@ def test_cbz_filename_does_not_normalize_non_year_dashes() -> None:
     ), "Only normalize year ranges, nothing else."
 
 
-def test_cbz_contains_comicbookinfo_comment(tmp_path: Path) -> None:
+def test_archive_comment(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     destination = tmp_path / "example.cbz"
 
@@ -202,7 +202,7 @@ def test_cbz_contains_comicbookinfo_comment(tmp_path: Path) -> None:
     assert data["ComicBookInfo/1.0"]["title"] == "Example #1"
 
 
-def test_cbz_filenames_follow_asset_order_for_every_mapping(tmp_path: Path) -> None:
+def test_asset_order(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     mappings = [(18, 19), (), None, (17,), (20, 21, 22, 23)]
     pages = []
