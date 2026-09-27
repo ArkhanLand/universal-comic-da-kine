@@ -47,8 +47,10 @@ ucd download 'https://www.marvel.com/comics/issue/72984' --cookies cookies.txt
 The Marvel adapter reads a Netscape-format cookie file for an authorized
 Marvel session; access depends on the account and source availability.
 `--output-dir` selects the destination. Multiple source arguments run in
-sequence; `--quit-on-error` stops on handled failures. Some HTTP failures
-still lack domain-level handling (see [issue #15][issue15]).
+sequence; `--quit-on-error` stops on handled failures. Bifrost metadata/assets
+404 responses report an unavailable digital edition
+without a traceback; other unexpected HTTP failures retain their existing
+behavior.
 
 ### Reusing Marvel downloads
 
@@ -113,5 +115,3 @@ test-network`) and require suitable access.
 Wrap Markdown prose, comments, and docstrings at 78 columns, including comment
 markers. Preserve code blocks, tables, and unbreakable URLs/identifiers when
 wrapping would change meaning. Python code uses the configured 100 columns.
-
-[issue15]: https://github.com/ArkhanLand/universal-comic-da-kine/issues/15

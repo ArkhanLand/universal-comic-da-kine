@@ -55,7 +55,7 @@ issue history or claiming their acceptance criteria have been implemented.
 | [#8][i8] logical pages | Preserve implemented mappings and cover-excluded count; distinguish logical Page from Asset and optional View. |
 | [#13][i13] CBZ input | Preserve source container and assets; random ZIP is not CBZ. Keep the specified ComicInfo-first metadata precedence. |
 | [#14][i14] Marvel reuse | Existing cache implements image reuse; general repository/history/retention remain separate work. |
-| [#15][i15] unavailable editions | Follow up on domain-level Bifrost 404 handling before broader testing. |
+| [#15][i15] unavailable editions | Implemented: Bifrost metadata/assets 404s report source unavailability; batches continue unless explicitly stopped. |
 
 Issues #1–4 and #9–12 cover acquisition, HTTP policy, naming, progress, and
 metadata projections. Those concerns remain compatible with this design;
