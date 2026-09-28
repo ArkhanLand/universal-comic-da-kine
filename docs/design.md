@@ -10,8 +10,9 @@ should remain migratable and understandable as the project changes.
 This is the agreed target architecture, not a list of implemented features.
 The current code has a `Publication` dataclass,
 `InputAdapter.get_publication()`, path-backed pages, Marvel acquisition, a
-persistent Marvel image cache, and CBZ output. It
-does not yet implement the general UCD Repository or revision manifests. See
+persistent Marvel image cache, local CBZ input with source retention, and CBZ
+output. It does not yet implement the general UCD Repository or revision
+manifests. See
 [the migration roadmap](roadmap.md) for API migration notes and
 [the adapter guide](adapters.md) for current extension points.
 
@@ -217,17 +218,18 @@ Unmatched ratios or a missing single-page reference emit a warning and retain
 all assets unchanged in source order. An unmatched span leaves that asset and
 subsequent inferred page numbers as `None` until a nonempty explicit mapping
 anchors numbering again. Explicit mappings always win, including `()` for
-non-counting assets; an empty mapping does not restore a lost numbering anchor.
-Without a reference, all existing mappings are retained without inference.
-The logical page count is unknown if any mapping is unknown; CBZ export still
-includes every image and omits unknown pagination metadata. Callers can
-disable inference with `get_pages(..., infer_pagination=False)`.
-`get_publication()` disables it for an explicit non-print `digital_format` (such as vertical
-Infinity Comics); a missing format retains the print-import default. Progress
-counts downloaded images, including the cover. Divisibility by four is not a
-general publication invariant. An earlier version of the code assumed stapled
-paper publications made from folded sheets, motivating that restriction. It
-does not apply to the logical page count of the supplied digital edition.
+non-counting assets; an empty mapping does not restore a lost numbering
+anchor. Without a reference, all existing mappings are retained without
+inference. The logical page count is unknown if any mapping is unknown; CBZ
+export still includes every image and omits unknown pagination metadata.
+Callers can disable inference with `get_pages(..., infer_pagination=False)`.
+`get_publication()` disables it for an explicit non-print `digital_format`
+(such as vertical Infinity Comics); a missing format retains the print-import
+default. Progress counts downloaded images, including the cover. Divisibility
+by four is not a general publication invariant. An earlier version of the code
+assumed stapled paper publications made from folded sheets, motivating that
+restriction. It does not apply to the logical page count of the supplied
+digital edition.
 
 ### Output and migration
 
@@ -278,8 +280,8 @@ cover          = publication cover
 narrative[0]   = first interior page of the reading experience
 ```
 
-A cover is never implicitly part of `narrative`. An output adapter may explicitly
-include the cover when the requested output calls for it.
+A cover is never implicitly part of `narrative`. An output adapter may
+explicitly include the cover when the requested output calls for it.
 
 ## Image metadata
 
@@ -551,12 +553,26 @@ authorization tokens are acquisition state, not publication metadata. Timed
 transitions may be retained as source metadata but are not native View
 semantics; flattening them requires explicit loss reporting.
 
-### Future CBZ input
+### CBZ input
 
-A CBZ input adapter has not yet been implemented. Its design should preserve
-the complete original ZIP member name for every imported asset, including
-directory components, rather than retaining only the basename. For example,
-`chapter-01/pages/003.jpg` and `chapter-02/pages/003.jpg` must remain
+The first CBZ input adapter retains the exact source archive and a member-name
+to object-hash record. Publication carries a source representation and a
+normalized-state snapshot so CBZ output can preserve native metadata without
+consulting the input adapter. Optional `ComicMetadata` carries prepared native
+documents and their provenance. Shared preparation preserves existing
+documents and generates missing ones before export. The CBZ writer packages
+those bytes, retaining original XML, comments, and member metadata. Other
+output formats consume normalized fields and may use attached documents where
+appropriate. Changed normalized state is refused until an explicit
+reconciliation policy exists; retaining originals in a cache is not permission
+to drop metadata from converted books. See the
+[supported subset](cbz-input.md). Duplicate
+member names and unsupported payloads are rejected by this implementation.
+The broader preservation design below still applies to future extensions.
+
+Preserve the complete original ZIP member name for every imported asset,
+including directory components, rather than retaining only the basename. For
+example, `chapter-01/pages/003.jpg` and `chapter-02/pages/003.jpg` must remain
 distinguishable. Associate each original member with its Publication asset
 independently of generated storage names, logical page numbers, and reading
 order. Member names are provenance and must not be blindly used as filesystem

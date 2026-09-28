@@ -6,6 +6,7 @@ from tests.helpers import make_test_publication
 from ucd.cli import app
 from ucd.exceptions import ComicDownloaderError, UnavailableError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
+from ucd.metadata import prepare_comic_metadata
 
 
 @pytest.mark.parametrize(
@@ -58,7 +59,7 @@ def test_cli_batch(tmp_path, monkeypatch, quit_on_error):
             if source == "1":
                 raise UnavailableError("No downloadable digital edition is available for ID 1")
             metadata_ready(publication.title, publication.series, publication.issue_number)
-            return publication
+            return prepare_comic_metadata(publication)
 
         def cleanup(self):
             cleaned.append(True)

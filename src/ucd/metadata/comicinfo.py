@@ -15,7 +15,8 @@ ROLE_MAP = {
     "coverartist": "CoverArtist",
 }
 
-# ComicInfo.xml uses a controlled AgeRating vocabulary. Keep source-native values in
+# ComicInfo.xml uses a controlled AgeRating vocabulary. Keep source-native
+# values in
 # the Publication and normalize only when serializing to this target format.
 AGE_RATING_MAP = {
     "rated t": "Teen",
@@ -89,8 +90,10 @@ def make_comicinfo(publication: Publication) -> bytes:
         attributes = {"Image": str(index)}
         if index == 0:
             attributes["Type"] = "FrontCover"
+        # Counting exclusion says nothing about physical span (including
+        # covers).
         # ComicInfo has no exact representation for unknown or 3+ page spans.
-        if page.numbers is not None and len(page.numbers) <= 2:
+        if page.numbers is not None and 1 <= len(page.numbers) <= 2:
             attributes["DoublePage"] = "true" if len(page.numbers) == 2 else "false"
         ET.SubElement(page_info, "Page", attributes)
 

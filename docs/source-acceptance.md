@@ -1,8 +1,8 @@
 # Source acceptance and native semantics
 
-This is the target acceptance policy. Today only Marvel Unlimited input and
-CBZ output are implemented. Native eligibility is not a claim of adapter
-availability or complete enforcement in the current code.
+This is the target acceptance policy. Today Marvel Unlimited and local CBZ
+inputs and CBZ output are implemented. Native eligibility is not a claim of
+adapter availability or complete enforcement in the current code.
 
 Acceptance depends on capabilities and presentation semantics, not a filename
 extension. A candidate must supply static reading units, a meaningful primary
@@ -28,6 +28,9 @@ image inside a fixed-layout EPUB is still non-native. A PDF's discrete static
 pages fit, but required embedded media, scripts, or dynamic forms do not.
 Ordinary reader navigation, search, and static links do not by themselves
 introduce a playback clock or disqualify a static publication.
+
+The current local archive subset and rejection rules are documented in
+[CBZ input](cbz-input.md). Eligibility above remains broader than implementation.
 
 ## Explicit conversion and loss reporting
 

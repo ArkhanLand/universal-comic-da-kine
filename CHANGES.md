@@ -20,6 +20,16 @@ features as work lands, and finalize this section against the release commit.
   ordered narrative images, ComicInfo XML, and ComicBookInfo ZIP-comment
   metadata. Exported metadata is a supported projection, not a complete
   round-trip representation of all source information.
+- Convert local static-image CBZs through Publication, preparing missing
+  ComicBookInfo ZIP comments from ComicInfo.xml and missing XML from comments.
+  Preserve image bytes, use natural filename order for normalization, and
+  honor cover/spread hints. Preserve original XML bytes, namespace
+  declarations, unknown fields, existing ZIP comments, member names, order,
+  and archive metadata in output. Shared metadata helpers attach prepared
+  documents to Publication; the CBZ writer only packages them. Retain partial
+  dates without inventing a day. Refuse stale or corrupt source replay. Retain
+  source archives and images by hash. The `convert` command refuses to
+  overwrite inputs and publishes only complete outputs.
 - Retain original Marvel image bytes in a persistent cache with SHA-256
   verification and per-fetch acquisition records. Reuse known assets despite
   changing delivery URLs; retain older acquisitions when refreshing.
@@ -32,7 +42,8 @@ features as work lands, and finalize this section against the release commit.
 - Represent logical page mappings separately from image order, including
   zero, one, multiple, or unknown logical pages per image. Exclude the cover
   from logical interior counts. Marvel imports can estimate spread extents;
-  ambiguous print pagination still requires explicit mappings.
+  spans within 2% are accepted. Ambiguous spans warn and remain unknown,
+  allowing export without discarding images or guessing subsequent numbers.
 - Preserve optional reading-direction and first-page-side metadata in the
   model, with supported projections into output metadata.
 - Use the normalized in-memory `Publication` class and `get_publication()`
@@ -53,9 +64,12 @@ features as work lands, and finalize this section against the release commit.
 
 ### Known limitations
 
-- The implemented conversion path is Marvel Unlimited to CBZ. CBZ, PDF,
+- Implemented inputs are Marvel Unlimited and local CBZ, with CBZ output. PDF,
   fixed-layout EPUB, directory, and other service inputs are not implemented.
   Native eligibility in the design is not a claim of adapter availability.
+- CBZ normalization maps supported fields, while output preserves the original
+  source representation. Explicit metadata editing/reconciliation is not yet
+  implemented. See [CBZ input limits](docs/cbz-input.md).
 - The general UCD Repository, publication revision history, independent
   retention/history policies, and transformation framework remain planned.
   The Marvel image cache does not implement all of these guarantees.

@@ -13,6 +13,7 @@ from tests.helpers import make_test_publication
 from ucd.cli import app
 from ucd.exceptions import ServiceResponseError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
+from ucd.metadata import prepare_comic_metadata
 from ucd.output.cbz import write_cbz
 
 
@@ -92,7 +93,10 @@ def test_reuse_and_export(tmp_path):
         assert "https://" not in json.dumps(record)
     publication = make_test_publication(tmp_path)
     destination = tmp_path / "cached.cbz"
-    write_cbz(replace(publication, cover=second.cover, narrative=second.pages), destination)
+    write_cbz(
+        prepare_comic_metadata(replace(publication, cover=second.cover, narrative=second.pages)),
+        destination,
+    )
     with ZipFile(destination) as archive:
         assert archive.read("00001.png") == server.images["one"]
         assert archive.read("00002.png") == server.images["two"]
@@ -193,7 +197,7 @@ def test_refresh_overwrite(tmp_path, monkeypatch):
 
         def get_publication(self, source, progress, metadata_ready):
             metadata_ready(publication.title, publication.series, publication.issue_number)
-            return publication
+            return prepare_comic_metadata(publication)
 
         def cleanup(self):
             pass

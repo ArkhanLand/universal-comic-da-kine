@@ -13,6 +13,7 @@ from ucd.input.marvel_unlimited import (
     _MarvelPageSources,
     _pagination_dimensions,
 )
+from ucd.metadata import prepare_comic_metadata
 from ucd.models import Page, Pages
 
 
@@ -241,7 +242,7 @@ def test_xmen_export(tmp_path, caplog):
     assert "pinup.png" in caplog.text
     publication = replace(make_test_publication(tmp_path), cover=cover, narrative=inferred.pages)
     destination = tmp_path / "xmen.cbz"
-    write_cbz(publication, destination)
+    write_cbz(prepare_comic_metadata(publication), destination)
     with ZipFile(destination) as archive:
         assert archive.namelist() == ["ComicInfo.xml", *[f"{i:05}.png" for i in range(36)]]
         assert [archive.read(f"{i:05}.png") for i in range(36)] == originals
