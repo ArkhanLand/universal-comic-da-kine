@@ -4,8 +4,8 @@ from datetime import date
 from pathlib import Path
 
 from tests.helpers import make_test_publication
+from ucd.metadata.comicinfo import make_comicinfo
 from ucd.models import Creator
-from ucd.output.comicinfo import make_comicinfo
 
 
 def test_metadata(tmp_path: Path) -> None:
@@ -85,8 +85,8 @@ def test_page_mapping(tmp_path: Path) -> None:
     assert [entry.get("Image") for entry in entries] == ["0", "1", "2", "3", "4"]
     assert entries[0].get("Type") == "FrontCover"
     assert [entry.get("DoublePage") for entry in entries] == [
-        "false",
-        "false",
+        None,
+        None,
         "false",
         "true",
         None,

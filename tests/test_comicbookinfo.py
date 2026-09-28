@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 
 from tests.helpers import make_test_publication
+from ucd.metadata import prepare_comic_metadata
+from ucd.metadata.comicbookinfo import make_comicbookinfo
 from ucd.models import Creator
 from ucd.output.cbz import write_cbz
-from ucd.output.comicbookinfo import make_comicbookinfo
 
 
 def test_metadata(tmp_path: Path) -> None:
@@ -72,6 +73,6 @@ def test_oversized_comment(
     destination = tmp_path / "example.cbz"
 
     with pytest.raises(ValueError, match="ZIP comments are limited"):
-        write_cbz(publication, destination)
+        write_cbz(prepare_comic_metadata(publication), destination)
 
     assert not destination.exists()

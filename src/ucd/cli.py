@@ -1,9 +1,13 @@
+import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import typer
 
-from ucd.exceptions import ComicDownloaderError
+from ucd.exceptions import ComicDownloaderError, InvalidComicInputError
+from ucd.input.cbz import CBZInputAdapter
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
+from ucd.metadata import prepare_comic_metadata
 from ucd.output.cbz import (
     make_cbz_filename,
     make_cbz_filename_from_metadata,
@@ -110,6 +114,7 @@ def download(
                     progress=progress.update,
                     metadata_ready=check_destination,
                 )
+                publication = prepare_comic_metadata(publication)
                 destination = output_dir / make_cbz_filename(publication)
                 write_cbz(
                     publication,
@@ -132,3 +137,59 @@ def download(
             raise typer.Exit(code=1)
     finally:
         adapter.cleanup()
+
+
+@app.command()
+def convert(
+    sources: list[Path] = typer.Argument(..., metavar="SOURCE..."),
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o", file_okay=False, help="Directory for converted CBZ files."
+    ),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    quit_on_error: bool = typer.Option(False, "--quit-on-error"),
+) -> None:
+    """Preserve local CBZs and add missing ZIP-comment metadata through
+    Publication.
+    """
+    adapter = CBZInputAdapter()
+    progress = _ProgressBar()
+    failures = 0
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    def check_destination(title: str, series: str | None, issue_number: str | None) -> None:
+        destination = output_dir / make_cbz_filename_from_metadata(title, series, issue_number)
+        for source in sources:
+            if destination.resolve() == source.resolve() or (
+                destination.exists() and source.exists() and destination.samefile(source)
+            ):
+                raise InvalidComicInputError(
+                    "Output would replace an input archive; choose another directory"
+                )
+        if destination.exists() and not overwrite:
+            raise FileExistsError(destination)
+
+    for source in sources:
+        progress.reset()
+        try:
+            publication = adapter.get_publication(
+                str(source), progress=progress.update, metadata_ready=check_destination
+            )
+            destination = output_dir / make_cbz_filename(publication)
+            # Publish only a complete archive; failure must not leave partial
+            # output.
+            with TemporaryDirectory(dir=output_dir) as scratch:
+                temporary = Path(scratch) / "output.cbz"
+                write_cbz(publication, temporary)
+                check_destination(publication.title, publication.series, publication.issue_number)
+                if overwrite:
+                    temporary.replace(destination)
+                else:
+                    os.link(temporary, destination)
+            typer.echo(f"Wrote {destination}")
+        except (ComicDownloaderError, OSError, ValueError) as exc:
+            failures += 1
+            typer.echo(f"Error: {exc}", err=True)
+            if quit_on_error:
+                raise typer.Exit(code=1) from exc
+    if failures:
+        raise typer.Exit(code=1)

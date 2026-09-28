@@ -61,7 +61,7 @@ issue history or claiming their acceptance criteria have been implemented.
 | [#6][i6] PDF input | Native static pages; extraction only when complete appearance is preserved, otherwise render with provenance. |
 | [#7][i7] EPUB input | Narrow native acceptance to static fixed-layout EPUB; reflowable/timed content requires explicit lossy conversion or rejection. |
 | [#8][i8] logical pages | Preserve implemented mappings and cover-excluded count; distinguish logical Page from Asset and optional View. |
-| [#13][i13] CBZ input | Preserve source container and assets; random ZIP is not CBZ. Keep the specified ComicInfo-first metadata precedence. |
+| [#13][i13] CBZ input | Initial local adapter implemented with source retention, ComicInfo-first precedence, and offline round trips; see [limits](cbz-input.md). |
 | [#14][i14] Marvel reuse | Existing cache implements image reuse; general repository/history/retention remain separate work. |
 | [#15][i15] unavailable editions | Implemented: Bifrost metadata/assets 404s report source unavailability; batches continue unless explicitly stopped. |
 
@@ -73,8 +73,9 @@ part of this documentation change.
 
 ## Gate for broader public testing
 
-- A useful tested input/output set beyond the current Marvel-to-CBZ path,
-  including fixture-based round trips and documented capability limits.
+- A useful tested input/output set: Marvel and local CBZ inputs now export
+  CBZ, including fixture-based round trips and documented capability limits.
+  Assess whether this set is sufficient for the first public alpha.
 - A documented adapter/module interface with working examples, explicit
   integration/discovery, lifecycle, error, and option contracts.
 - Clear source acceptance, metadata fidelity, preservation, and loss reports.

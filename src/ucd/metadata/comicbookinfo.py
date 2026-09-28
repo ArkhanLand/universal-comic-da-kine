@@ -41,7 +41,8 @@ def make_comicbookinfo(publication: Publication) -> bytes:
         info["title"] = publication.title
 
     if publication.publication_date is not None:
-        info["publicationMonth"] = publication.publication_date.month
+        if publication.publication_date.month is not None:
+            info["publicationMonth"] = publication.publication_date.month
         info["publicationYear"] = publication.publication_date.year
 
     credits = [

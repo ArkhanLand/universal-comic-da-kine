@@ -7,6 +7,7 @@ from zipfile import ZipFile
 import pytest
 
 from tests.helpers import make_test_publication
+from ucd.metadata import prepare_comic_metadata
 from ucd.output.cbz import (
     make_cbz_filename,
     make_cbz_filename_from_metadata,
@@ -62,7 +63,7 @@ def test_archive_content(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
 
     destination = tmp_path / "example.cbz"
-    write_cbz(publication, destination)
+    write_cbz(prepare_comic_metadata(publication), destination)
 
     with ZipFile(destination) as archive:
         assert archive.namelist() == [
@@ -84,7 +85,7 @@ def test_reject_overwrite(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
 
     with pytest.raises(FileExistsError):
-        write_cbz(publication, destination)
+        write_cbz(prepare_comic_metadata(publication), destination)
 
 
 def test_allow_overwrite(tmp_path: Path) -> None:
@@ -93,7 +94,7 @@ def test_allow_overwrite(tmp_path: Path) -> None:
 
     publication = make_test_publication(tmp_path)
 
-    write_cbz(publication, destination, overwrite=True)
+    write_cbz(prepare_comic_metadata(publication), destination, overwrite=True)
 
     with ZipFile(destination) as archive:
         assert "ComicInfo.xml" in archive.namelist()
@@ -193,7 +194,7 @@ def test_archive_comment(tmp_path: Path) -> None:
     publication = make_test_publication(tmp_path)
     destination = tmp_path / "example.cbz"
 
-    write_cbz(publication, destination)
+    write_cbz(prepare_comic_metadata(publication), destination)
 
     with ZipFile(destination) as archive:
         data = json.loads(archive.comment.decode("utf-8"))
@@ -212,7 +213,7 @@ def test_asset_order(tmp_path: Path) -> None:
         pages.append(replace(publication.narrative[0], numbers=numbers, path=path))
     publication = replace(publication, narrative=tuple(pages))
     destination = tmp_path / "mixed.cbz"
-    write_cbz(publication, destination)
+    write_cbz(prepare_comic_metadata(publication), destination)
     with ZipFile(destination) as archive:
         assert archive.namelist() == [
             "ComicInfo.xml",

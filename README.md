@@ -10,9 +10,10 @@ formats without forgetting provenance. UCD complements library organizers such
 as Calibre by focusing on normalization, preservation, and conversion. It does
 not aim to replace your collection catalog or reading application.
 
-**Pre-1.0, early development.** The implemented path is Marvel Unlimited
-acquisition to CBZ, with ComicInfo XML and ComicBookInfo ZIP-comment metadata.
-Marvel image bytes and per-fetch records are retained in a persistent cache.
+**Pre-1.0, early development.** Marvel Unlimited and local CBZ inputs export
+to CBZ with ComicInfo XML and ComicBookInfo ZIP-comment metadata. Marvel image
+bytes and per-fetch records are cached; CBZ input retains source archives and
+image bytes by hash.
 The general historical repository, transformation framework, and additional
 input/output adapters described below are planned, not available features.
 
@@ -51,6 +52,19 @@ sequence; `--quit-on-error` stops on handled failures. Bifrost metadata/assets
 404 responses report an unavailable digital edition
 without a traceback; other unexpected HTTP failures retain their existing
 behavior.
+
+### Reprocessing existing CBZs
+
+```sh
+ucd convert 'Example #1.cbz' --output-dir ./converted
+```
+
+Existing ComicInfo.xml or ZIP-comment metadata fills the normalized model;
+missing metadata documents are prepared before export. Existing
+XML, comments, image bytes, names, and archive metadata are preserved exactly
+in the output. Inputs remain untouched. Normalized metadata edits are refused
+until an explicit reconciliation policy is available. See
+[CBZ input](docs/cbz-input.md) for acceptance, ordering, and metadata limits.
 
 ### Reusing Marvel downloads
 
