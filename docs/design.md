@@ -191,7 +191,7 @@ portrait (`0 < width < height`) interior image dimensions provide a
 single-page reference (excluding explicit zero/multi-page mappings). A
 portrait cover is the fallback if no such interior asset exists. Each image's
 width is mathematically scaled to this reference height; a positive integer
-width multiple within 1% is accepted as an estimated logical span, including
+width multiple within 2% is accepted as an estimated logical span, including
 3+ page spreads. No image resampling is needed.
 
 If the original rectangle does not fit, the adapter tries a measurement
@@ -208,14 +208,19 @@ unusual reference proportions. It is an import heuristic, not authoritative
 metadata. Dimensions alone cannot establish an absolute single-page size: if
 every asset contains the same multi-page span, their relative sizes do not
 reveal that span. An all-landscape collection provides no portrait reference
-and raises an error. Uniform multi-page assets that remain portrait could
-instead be mistaken for singles and undercounted. Explicit mappings are needed
-to resolve that ambiguity; a tighter matching tolerance cannot resolve it.
+and leaves inferred pagination unknown with a warning. Uniform multi-page
+assets that remain portrait could instead be mistaken for singles and
+undercounted. Explicit mappings are needed to resolve that ambiguity; a
+tighter matching tolerance cannot resolve it.
 
-Unmatched ratios or a missing single-page reference raise `ValueError`,
-identifying the asset and requesting an explicit page-number mapping. Imports
-do not silently continue with incomplete inferred pagination. Explicit
-mappings always win, including `()` for non-counting assets. Callers can
+Unmatched ratios or a missing single-page reference emit a warning and retain
+all assets unchanged in source order. An unmatched span leaves that asset and
+subsequent inferred page numbers as `None` until a nonempty explicit mapping
+anchors numbering again. Explicit mappings always win, including `()` for
+non-counting assets; an empty mapping does not restore a lost numbering anchor.
+Without a reference, all existing mappings are retained without inference.
+The logical page count is unknown if any mapping is unknown; CBZ export still
+includes every image and omits unknown pagination metadata. Callers can
 disable inference with `get_pages(..., infer_pagination=False)`.
 `get_publication()` disables it for an explicit non-print `digital_format` (such as vertical
 Infinity Comics); a missing format retains the print-import default. Progress
