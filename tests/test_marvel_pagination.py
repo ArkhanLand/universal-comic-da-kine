@@ -62,13 +62,16 @@ def test_padded_spans(tmp_path, border_color):
     assert [p.path.read_bytes() for p in (cover, *pages.pages)] == originals
 
 
-def test_span_override(tmp_path):
+def test_span_override(tmp_path, caplog):
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     single = asset(tmp_path, "single", (100, 150))
     ambiguous = asset(tmp_path, "wide", (267, 150))
     pages = Pages(cover=cover, pages=(single, ambiguous, single))
-    with pytest.raises(ValueError, match=r"wide.png.*267 x 150.*within 1%.*explicit"):
-        _infer_page_numbers(pages)
+    inferred = _infer_page_numbers(pages)
+    assert [p.numbers for p in inferred.pages] == [(1,), None, None]
+    assert inferred.logical_page_count is None
+    assert "wide.png: original 267 x 150" in caplog.text
+    assert "within 2%" in caplog.text
     explicit = replace(ambiguous, numbers=(2, 3, 4))
     inferred = _infer_page_numbers(replace(pages, pages=(single, explicit, single)))
     assert [p.numbers for p in inferred.pages] == [(1,), (2, 3, 4), (5,)]
@@ -89,20 +92,21 @@ def test_explicit_spans(tmp_path):
     assert [p.numbers for p in inferred.pages] == [(), (17,), (18, 19)]
 
 
-def test_blank_rejected(tmp_path):
+def test_blank_retained(tmp_path, caplog):
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     blank = asset(tmp_path, "blank", (267, 150))
     Image.new("RGB", (267, 150), "black").save(blank.path)
     assert _pagination_dimensions(blank) is None
-    with pytest.raises(ValueError, match="blank.png.*no nonblack content"):
-        _infer_page_numbers(Pages(cover=cover, pages=(blank,)))
+    pages = Pages(cover=cover, pages=(blank,))
+    assert _infer_page_numbers(pages) == pages
+    assert "no nonblack content" in caplog.text
 
 
-def test_no_reference(tmp_path):
+def test_no_reference(tmp_path, caplog):
     cover = replace(asset(tmp_path, "cover", (200, 150)), numbers=())
     pages = Pages(cover=cover, pages=(asset(tmp_path, "wide", (400, 150)),))
-    with pytest.raises(ValueError, match="wide.png.*no portrait single-page reference"):
-        _infer_page_numbers(pages)
+    assert _infer_page_numbers(pages) == pages
+    assert "no portrait single-page reference" in caplog.text
 
 
 def test_retain_gutter(tmp_path):
@@ -163,7 +167,8 @@ def test_jpeg_gatefold(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "multiple, expected", [(2.0, 2), (2.01, 2), (2.03, None), (3.89, None), (3.97, 4), (4.0, 4)]
+    "multiple, expected",
+    [(1.95, None), (1.97, 2), (2.0, 2), (2.03, 2), (2.05, None), (3.89, None), (3.93, 4), (4.0, 4)],
 )
 def test_span_tolerance(multiple, expected):
     assert _inferred_span((round(1000 * multiple), 1500), (1000, 1500)) == expected
@@ -178,12 +183,13 @@ def test_prefer_interior(tmp_path):
     assert [p.numbers for p in inferred.pages] == [(1,), (2, 3)]
 
 
-def test_retain_white(tmp_path):
+def test_retain_white(tmp_path, caplog):
     page = asset(tmp_path, "white-paper", (400, 150), border=30, border_color=(255, 255, 255))
     assert _pagination_dimensions(page) == (460, 210)
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
-    with pytest.raises(ValueError, match="white-paper.png.*within 1%"):
-        _infer_page_numbers(Pages(cover=cover, pages=(page,)))
+    pages = Pages(cover=cover, pages=(page,))
+    assert _infer_page_numbers(pages) == pages
+    assert "within 2%" in caplog.text
 
 
 def test_black_padding(tmp_path):
@@ -193,3 +199,52 @@ def test_black_padding(tmp_path):
         padded.paste(white_page, (10, 10))
         padded.save(page.path)
     assert _pagination_dimensions(page) == (120, 170)
+
+
+def test_resume_at_anchor(tmp_path, caplog):
+    cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
+    single = asset(tmp_path, "single", (100, 150))
+    odd = asset(tmp_path, "odd", (267, 150))
+    pages = Pages(
+        cover=cover,
+        pages=(
+            single,
+            odd,
+            replace(odd, numbers=()),
+            single,
+            replace(single, numbers=(17,)),
+            single,
+        ),
+    )
+    inferred = _infer_page_numbers(pages)
+    assert [p.numbers for p in inferred.pages] == [(1,), None, (), None, (17,), (18,)]
+    assert len(caplog.records) == 1
+
+
+def test_xmen_export(tmp_path, caplog):
+    # Synthetic artwork with the observed dimensions and 36-image sequence.
+    from zipfile import ZipFile
+
+    from tests.helpers import make_test_publication
+    from ucd.output.cbz import write_cbz
+
+    cover = replace(asset(tmp_path, "cover", (6897, 2800)), numbers=())
+    single = asset(tmp_path, "single", (1844, 2800))
+    spread = asset(tmp_path, "spread", (3757, 2800))
+    pinup = asset(tmp_path, "pinup", (2110, 2800))
+    pages = Pages(cover=cover, pages=(*([single] * 31), spread, spread, spread, pinup))
+    originals = [p.path.read_bytes() for p in (cover, *pages.pages)]
+    inferred = _infer_page_numbers(pages)
+    assert [p.numbers for p in inferred.pages[:31]] == [(n,) for n in range(1, 32)]
+    assert [p.numbers for p in inferred.pages[31:]] == [(32, 33), (34, 35), (36, 37), None]
+    assert len(caplog.records) == 1
+    assert "pinup.png" in caplog.text
+    publication = replace(make_test_publication(tmp_path), cover=cover, narrative=inferred.pages)
+    destination = tmp_path / "xmen.cbz"
+    write_cbz(publication, destination)
+    with ZipFile(destination) as archive:
+        assert archive.namelist() == ["ComicInfo.xml", *[f"{i:05}.png" for i in range(36)]]
+        assert [archive.read(f"{i:05}.png") for i in range(36)] == originals
+        assert b"<PageCount>" not in archive.read("ComicInfo.xml")
+    assert [p.path.read_bytes() for p in (cover, *pages.pages)] == originals
+    assert "Preserving assets" in caplog.text

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import mimetypes
 import re
 from collections import Counter
@@ -27,6 +28,8 @@ from ucd.exceptions import (
 )
 from ucd.input.base import InputAdapter, MetadataCallback, ProgressCallback
 from ucd.models import Creator, DownloadedImageFile, Page, Pages, Publication
+
+logger = logging.getLogger(__name__)
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -94,7 +97,7 @@ def _pagination_dimensions(page: Page) -> tuple[int, int] | None:
 
 
 def _inferred_span(dimensions: tuple[int, int], reference: tuple[int, int]) -> int | None:
-    """Scale the measurement to the reference height; accept integer spans within 1%."""
+    """Scale the measurement to the reference height; accept integer spans within 2%."""
     width, height = dimensions
     reference_width, reference_height = reference
     if min(width, height, reference_width, reference_height) <= 0:
@@ -102,17 +105,18 @@ def _inferred_span(dimensions: tuple[int, int], reference: tuple[int, int]) -> i
     scaled_width = width * reference_height / height
     relative_span = scaled_width / reference_width
     span = round(relative_span)
-    return span if span >= 1 and isclose(relative_span, span, rel_tol=0.01) else None
+    return span if span >= 1 and isclose(relative_span, span, rel_tol=0.02) else None
 
 
 def _infer_page_numbers(pages: Pages) -> Pages:
     """Estimate horizontal spans against the dominant portrait interior dimensions.
 
     This is a Marvel import heuristic, not a model invariant or source assertion.
-    Explicit mappings win. An ambiguous span raises rather than silently producing
-    incomplete logical pagination. Counts describe the supplied digital edition,
-    not omitted print pages. Uniform multi-page assets can defeat the assumed
-    single-page reference; dimensions alone cannot resolve that ambiguity.
+    Explicit mappings win. An ambiguous span warns and leaves pagination unknown
+    until a nonempty explicit mapping anchors subsequent numbering. Counts
+    describe the supplied digital edition, not omitted print pages. Uniform
+    multi-page assets can defeat the assumed single-page reference; dimensions
+    alone cannot resolve that ambiguity.
     """
     if all(page.numbers is not None for page in pages.pages):
         return pages
@@ -127,18 +131,21 @@ def _infer_page_numbers(pages: Pages) -> Pages:
         reference = (pages.cover.width, pages.cover.height)
     else:
         page = next(page for page in pages.pages if page.numbers is None)
-        raise ValueError(
-            f"Cannot infer logical page span for {page.path}: no portrait single-page "
-            "reference is available. Supply explicit page-number mappings."
+        logger.warning(
+            "Cannot infer logical page span for %s: no portrait single-page "
+            "reference is available. Preserving assets with unknown pagination; "
+            "explicit page-number mappings can resolve it.",
+            page.path,
         )
+        return pages
 
-    next_number = 1
+    next_number: int | None = 1
     inferred = []
     for page in pages.pages:
         if page.numbers is not None:
             if page.numbers:
                 next_number = max(page.numbers) + 1
-        else:
+        elif next_number is not None:
             # Ordinary print-page margins are part of the page rectangle. Only
             # try trimming padding when the original dimensions do not fit.
             dimensions: tuple[int, int] | None = (page.width, page.height)
@@ -153,14 +160,17 @@ def _infer_page_numbers(pages: Pages) -> Pages:
                     if dimensions is not None
                     else "no nonblack content"
                 )
-                raise ValueError(
+                logger.warning(
                     f"Cannot infer logical page span for {page.path}: "
                     f"original {page.width} x {page.height}, {measurement}, "
                     f"reference {reference[0]} x {reference[1]}; "
-                    "no positive integer span within 1%. Supply an explicit page-number mapping."
+                    "no positive integer span within 2%. Preserving assets; pagination remains "
+                    "unknown until a nonempty explicit page-number mapping anchors it."
                 )
-            page = replace(page, numbers=tuple(range(next_number, next_number + span)))
-            next_number += span
+                next_number = None
+            else:
+                page = replace(page, numbers=tuple(range(next_number, next_number + span)))
+                next_number += span
         inferred.append(page)
     return replace(pages, pages=tuple(inferred))
 
