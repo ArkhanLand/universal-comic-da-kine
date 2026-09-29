@@ -126,6 +126,17 @@ rules, and metadata fidelity as well as add adapters. Run `make check` with
 the development dependencies installed; live-service tests are separate (`make
 test-network`) and require suitable access.
 
+## Development process
+
+UCD is developed with assistance from AI coding tools, including ChatGPT and
+Codex. They are used for tasks such as implementation, refactoring, testing,
+documentation, research, and code review.
+
+Architecture, requirements, data-model decisions, compatibility constraints,
+and acceptance of changes remain the maintainer's responsibility. AI-assisted
+changes are reviewed, tested, and revised as part of the normal development
+process.
+
 Wrap Markdown prose, comments, and docstrings at 78 columns, including comment
 markers. Preserve code blocks, tables, and unbreakable URLs/identifiers when
 wrapping would change meaning. Python code uses the configured 100 columns.
