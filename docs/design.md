@@ -195,6 +195,25 @@ width is mathematically scaled to this reference height; a positive integer
 width multiple within 2% is accepted as an estimated logical span, including
 3+ page spreads. No image resampling is needed.
 
+Only when the image height differs from the reference height does the
+adapter consider swapped axes for spans of two or more pages. The image
+width must match the reference height exactly, to the pixel. The 2%
+tolerance applies to the resulting spread width, allowing for print
+variations such as gatefold panels shortened to accommodate folding near
+the outer edge and spine; it does not apply to the height comparison.
+That exact pixel-scale check avoids mistaking a differently sized pin-up
+for a rescaled spread. This recognizes spreads read with the print comic
+turned sideways, whose digital artwork is already upright. It assigns a
+span without rotating or rewriting the image. Conflicting span estimates
+between orientations remain unknown.
+
+A separate single-page fallback accepts images at exactly the reference
+pixel height with widths from 94% to 100% of the reference width. This
+covers the narrower promotional templates inspected in Avengers (2018)
+#16, #18, #21, #30, and #49. It does not widen the spread tolerance, accept
+wider single pages, classify content as advertising, or exclude it from
+counting. It remains a heuristic, not proof of physical page extent.
+
 If the original rectangle does not fit, the adapter tries a measurement
 excluding solid black edge bands in memory. Each RGB channel may differ from
 black by at most 8, allowing small JPEG artifacts; only complete outer rows

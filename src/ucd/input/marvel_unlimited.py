@@ -108,8 +108,40 @@ def _inferred_span(dimensions: tuple[int, int], reference: tuple[int, int]) -> i
     return span if span >= 1 and isclose(relative_span, span, rel_tol=0.02) else None
 
 
+def _presentation_span(dimensions: tuple[int, int], reference: tuple[int, int]) -> int | None:
+    """Recognize ordinary spans and spreads presented a quarter-turn around.
+
+    Matching reference heights rule out a quarter-turn check. Conflicting
+    orientation matches remain unknown. The narrow-single fallback
+    covers Marvel promotional templates at the reference pixel height, up to
+    6% narrower. It does not identify advertisements or change their role.
+    """
+    width, height = dimensions
+    reference_width, reference_height = reference
+    if min(width, height, reference_width, reference_height) <= 0:
+        return None
+    direct = _inferred_span(dimensions, reference)
+    # Only try a quarter-turn when the height differs from the reference.
+    # Also require the expected pixel scale: the width must match the
+    # reference height exactly, so a pin-up cannot pass through rescaling alone.
+    turned = (
+        _inferred_span((height, width), reference)
+        if height != reference_height and width == reference_height
+        else None
+    )
+    # A quarter-turn is evidence for a spread only, not for a single page.
+    matches = {span for span in (direct, turned) if span is not None and span >= 2}
+    if direct == 1:
+        matches.add(1)
+    if matches:
+        return matches.pop() if len(matches) == 1 else None
+    if height == reference_height and 0.94 * reference_width <= width <= reference_width:
+        return 1
+    return None
+
+
 def _infer_page_numbers(pages: Pages) -> Pages:
-    """Estimate horizontal spans against the dominant portrait interior dimensions.
+    """Estimate spans against the dominant portrait interior dimensions.
 
     This is a Marvel import heuristic, not a model invariant or source assertion.
     Explicit mappings win. An ambiguous span warns and leaves pagination unknown
@@ -149,11 +181,11 @@ def _infer_page_numbers(pages: Pages) -> Pages:
             # Ordinary print-page margins are part of the page rectangle. Only
             # try trimming padding when the original dimensions do not fit.
             dimensions: tuple[int, int] | None = (page.width, page.height)
-            span = _inferred_span((page.width, page.height), reference)
+            span = _presentation_span((page.width, page.height), reference)
             if span is None:
                 dimensions = _pagination_dimensions(page)
                 if dimensions is not None:
-                    span = _inferred_span(dimensions, reference)
+                    span = _presentation_span(dimensions, reference)
             if span is None:
                 measurement = (
                     f"{dimensions[0]} x {dimensions[1]} after black-border measurement"
@@ -164,7 +196,8 @@ def _infer_page_numbers(pages: Pages) -> Pages:
                     f"Cannot infer logical page span for {page.path}: "
                     f"original {page.width} x {page.height}, {measurement}, "
                     f"reference {reference[0]} x {reference[1]}; "
-                    "no positive integer span within 2%. Preserving assets; pagination remains "
+                    "no unambiguous span within 2% in either spread orientation "
+                    "or the same-height narrow-single fallback. Preserving assets; pagination remains "
                     "unknown until a nonempty explicit page-number mapping anchors it."
                 )
                 next_number = None
