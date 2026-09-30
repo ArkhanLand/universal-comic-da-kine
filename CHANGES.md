@@ -42,7 +42,10 @@ features as work lands, and finalize this section against the release commit.
 - Represent logical page mappings separately from image order, including
   zero, one, multiple, or unknown logical pages per image. Exclude the cover
   from logical interior counts. Marvel imports can estimate spread extents;
-  spans within 2% are accepted. Ambiguous spans warn and remain unknown,
+  spans within 2% are accepted, including quarter-turned spreads. A limited
+  same-height fallback accepts single pages up to 6% narrower than the
+  reference, covering inspected Marvel promotional layouts. Images remain
+  unchanged. Ambiguous spans warn and remain unknown,
   allowing export without discarding images or guessing subsequent numbers.
 - Preserve optional reading-direction and first-page-side metadata in the
   model, with supported projections into output metadata.

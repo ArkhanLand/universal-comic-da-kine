@@ -12,6 +12,7 @@ from ucd.input.marvel_unlimited import (
     _MarvelPageSource,
     _MarvelPageSources,
     _pagination_dimensions,
+    _presentation_span,
 )
 from ucd.metadata import prepare_comic_metadata
 from ucd.models import Page, Pages
@@ -173,6 +174,65 @@ def test_jpeg_gatefold(tmp_path):
 )
 def test_span_tolerance(multiple, expected):
     assert _inferred_span((round(1000 * multiple), 1500), (1000, 1500)) == expected
+
+
+@pytest.mark.parametrize(
+    "size, expected",
+    [
+        ((2800, 3642), 2),
+        ((2799, 3642), None),
+        ((2801, 3642), None),
+        ((2800, 3600), 2),
+        ((1724, 2800), 1),
+        ((1723, 2800), 1),
+        ((1712, 2800), 1),
+        ((1711, 2800), None),
+        ((1723, 2799), None),
+        ((1919, 2800), None),
+        ((3446, 2800), None),
+        ((2800, 3446), None),
+        ((0, 2800), None),
+    ],
+)
+def test_presentation_span(size, expected):
+    assert _presentation_span(size, (1821, 2800)) == expected
+
+
+def test_orientation_conflict():
+    # This rectangle fits three pages directly and two when turned.
+    assert _presentation_span((2449, 2000), (1000, 2449)) is None
+
+
+@pytest.mark.parametrize(
+    "size, reference, expected",
+    [((2110, 2800), (1844, 2800), None), ((2000, 2000), (1000, 2000), 2)],
+    ids=["xmen-pinup", "square-spread"],
+)
+def test_matching_height(monkeypatch, size, reference, expected):
+    calls = []
+
+    def measure(dimensions, reference):
+        calls.append(dimensions)
+        return _inferred_span(dimensions, reference)
+
+    monkeypatch.setattr("ucd.input.marvel_unlimited._inferred_span", measure)
+    assert _presentation_span(size, reference) == expected
+    assert calls == [size]
+
+
+def test_avengers_spans(tmp_path, caplog):
+    cover = replace(asset(tmp_path, "cover", (1821, 2800)), numbers=())
+    single = asset(tmp_path, "single", (1821, 2800))
+    turned = asset(tmp_path, "turned", (2800, 3642))
+    promo = asset(tmp_path, "promo", (1723, 2800))
+    pages = Pages(cover=cover, pages=(single, turned, single, promo, single))
+    originals = [p.path.read_bytes() for p in pages.pages]
+    inferred = _infer_page_numbers(pages)
+    assert [p.numbers for p in inferred.pages] == [(1,), (2, 3), (4,), (5,), (6,)]
+    assert inferred.logical_page_count == 6
+    assert not caplog.records
+    assert [replace(p, numbers=None) for p in inferred.pages] == list(pages.pages)
+    assert [p.path.read_bytes() for p in inferred.pages] == originals
 
 
 def test_prefer_interior(tmp_path):
