@@ -384,7 +384,12 @@ def test_download_pages(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("digital_format", ["print", "vertical", None])
-def test_publication(monkeypatch, digital_format):
+@pytest.mark.parametrize(
+    "rating_metadata",
+    [{"rating": "Rated T+"}, {"rating": None}, {}],
+    ids=["rating-present", "rating-null", "rating-missing"],
+)
+def test_publication(monkeypatch, digital_format, rating_metadata):
     adapter = MarvelUnlimitedAdapter(client=httpx.Client())
 
     issue_data = _MarvelIssueData(
@@ -399,7 +404,6 @@ def test_publication(monkeypatch, digital_format):
         "series_title": "House of X (2019)",
         "release_date": "2019-07-24",
         "description": "Test description",
-        "rating": "Rated T+",
         "imprint": None,
         "thumbnail": {
             "path": "https://example.com/thumbnail",
@@ -418,6 +422,8 @@ def test_publication(monkeypatch, digital_format):
             ]
         },
     }
+
+    metadata.update(rating_metadata)
 
     if digital_format is not None:
         metadata["digital_format"] = digital_format
@@ -495,7 +501,7 @@ def test_publication(monkeypatch, digital_format):
     assert publication.publication_date == date(2019, 7, 24)
     assert publication.publisher == "Marvel"
     assert publication.description == "Test description"
-    assert publication.age_rating == "Rated T+"
+    assert publication.age_rating == rating_metadata.get("rating")
     assert publication.imprint is None
     assert publication.thumbnail_url == "https://example.com/thumbnail.jpg"
 
