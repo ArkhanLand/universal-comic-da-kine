@@ -254,7 +254,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             publication_date=date.fromisoformat(metadata["release_date"]),
             publisher="Marvel",
             description=metadata["description"],
-            age_rating=metadata["rating"],
+            age_rating=metadata.get("rating"),
             imprint=metadata.get("imprint"),
             thumbnail_url=f"{metadata['thumbnail']['path']}.{metadata['thumbnail']['extension']}",
             creators=tuple(
