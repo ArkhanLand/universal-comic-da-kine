@@ -3,8 +3,8 @@
 ## Status and scope
 
 This document records observed retrieval behavior and the proposed acquisition
-boundary for Libby titles delivered through OverDrive Read. It adds no adapter,
-CLI routing, or stable capture schema. The existing
+boundary and agreed CLI workflow for Libby titles delivered through OverDrive
+Read. It adds no adapter, CLI routing, or stable acquisition manifest schema. The existing
 [core design](design.md) and [adapter contract](adapters.md) apply.
 
 The investigated rendition was *Mecha-Ude: Mechanical Arms, Volume 1*,
@@ -65,7 +65,17 @@ non-linear resources, if present, should be preserved as source structure
 without automatically becoming narrative or covers. Missing or conflicting
 role information requires explicit handling rather than positional guessing.
 Narrative membership does not by itself prove a logical single-page extent or
-printed pagination.
+printed pagination. The user confirmed that this particular manga has no
+spreads: its narrative images represent logical pages 1 through 192, each
+with a singleton `numbers` mapping, and its logical page count is 192.
+
+For general imports, reuse Marvel's documented pagination policy rather than
+assuming every component is a single page. This includes the 2% tolerance for
+integer page-width multiples, the narrow single-page range of 94–100% at the
+exact reference height, and the existing reference selection, orientation,
+edge-band measurement, and unknown-mapping rules described in
+[Marvel pagination](design.md#marvel-pagination). Explicit mappings take
+precedence. Measurements must not modify the retained image bytes.
 
 `BIF.map["i18n-page-progression-direction"]` is explicitly `rtl` for this
 title, so `Publication.reading_direction` is `rtl`. This does not reverse the
@@ -115,9 +125,10 @@ and CSS. Inspect the extracted full cover independently.
 
 ## Exact bytes and verification
 
-Fetch the mapped image resources inside the authorized reader context and
-retain the exact response-body bytes available to the browser. Compute
-SHA-256 over those bytes before writing them to disk or a capture envelope.
+Fetch mapped image resources through authorized fulfillment and retain the
+exact response-body bytes. The research did this inside the browser reader;
+the intended adapter will do it directly. Compute SHA-256 over acquired bytes
+before publishing them to the cache or a capture envelope.
 No canvas export, screenshot, resizing, JPEG re-encoding, or metadata rewrite
 belongs in this acquisition path. Image decoding for inspection must not
 replace the stored bytes.
@@ -137,29 +148,164 @@ bodies are the acquired source objects. Capture member names describe storage;
 they do not define reading order or logical pagination. Envelope names and a
 versioned manifest schema remain implementation decisions.
 
-## Browser capture and Python adapter boundary
+## Direct acquisition and normalization boundary
 
-The browser-side **Libby OverDrive Read capture** owns the live reader context:
-discovering BIF/spine metadata, resolving CSS mappings, fetching authorized
-image bytes and catalog metadata, sanitizing provenance, and exporting a
-complete capture. Browser authentication and runtime state stop at this
-boundary. A cross-origin reader frame could not use the directory picker in
-the investigation; a generated ZIP provided a working transport.
+The agreed user workflow is direct, browser-free acquisition:
 
-A proposed `LibbyOverDriveReadAdapter` would consume that local capture,
-validate its version and structure, verify every asset hash, retain/cache
-exact source objects, inspect image properties, normalize supported metadata,
-and return a complete `Publication` through `get_publication()`. It should
-not require replaying a loan session or carrying browser credentials into
-Python. Downstream output consumes Publication and available bytes through
-the existing adapter contract.
+```text
+ucd init --service libby-overdrive
+ucd download --service libby-overdrive 11103570
+```
 
-This source supplies multiple objects and already fits the architectural
-boundary described in the design. General repository persistence and raw
-metadata attachments remain planned capabilities; this document does not
-claim they are implemented or introduce new model fields.
+`LibbyOverDriveReadAdapter` will use saved authentication to verify the active
+loan, obtain authorized OverDrive Read fulfillment, retrieve openbook/BIF and
+CSS resources, resolve the spine-to-image associations, and fetch source
+assets. Acquisition then verifies/caches exact objects, inspects image
+properties, normalizes supported metadata, and returns a complete
+`Publication` through `get_publication()`. Output consumes Publication and
+available bytes through the existing adapter contract.
 
-## Sanitized capture metadata
+Manual browser capture is a research/reference-fixture path, not a required
+user step or the normal adapter input. In the investigation, a cross-origin
+reader frame could not use the directory picker; a generated ZIP supplied a
+working transport. That successful capture established mapping and exact-byte
+retrieval inside an authorized session. It did not verify standalone UCD
+loan fulfillment. Direct authentication and fulfillment must be validated
+before claiming browser-free download support.
+
+The locally installed npm package `libby-archiver` 0.4.0 provides a concrete
+research starting point. Its setup resolves a library key, links a card using
+its number and PIN, bootstraps a reusable identity through chip/sync-code
+operations, and caches a session token. These are observations from its source,
+not a supported service API or a commitment to copy its implementation. Its
+automatic insecure-TLS fallback must not be copied; certificate verification
+remains enabled. The package's extraction stalled at 0/193 for the investigated
+rendition, which is why browser JavaScript was used for the successful capture.
+
+This source supplies multiple objects and fits the architectural boundary
+in the design. General repository persistence and raw metadata attachments
+remain planned capabilities; this document introduces no new model fields.
+
+## Setup, saved cards, and authentication failures
+
+Setup prompts for the library key (the slug in
+`libbyapp.com/library/<key>`), card number, and PIN/passcode, then verifies
+authentication. The investigated setup used `phoenix`; this lookup key is
+distinct from the observed Thunder library identifier `phoenix-phoenixpl`.
+Resolve the library rather than assuming these identifiers are interchangeable.
+
+Support multiple saved card connections. Default a connection's readable name
+to its library key; ask for a distinct name when adding a second card at that
+library. `--library-card <name>` selects a saved connection during setup or
+download. Without an explicit selection, search cards in saved preference
+order for an active checkout and use the first match.
+
+Store card numbers, PINs, and reusable authentication tokens in the system
+credential store. Ordinary UCD configuration holds connection names, library
+identifiers, and preference order. Target terminal use on macOS, Windows, and
+desktop Linux with a usable system credential store. Headless/SSH usage and
+file-based credential fallbacks are out of scope for now; unavailable or locked
+credential storage must produce a clear error.
+
+Normal session expiry may trigger automatic renewal using stored credentials.
+Outside `ucd init`, any authentication/credential failure is a hard failure
+for the whole command, even with `--continue-on-error`. Do not prompt for
+replacement credentials during download. Identify the affected saved connection
+and ask the user to repair it, for example:
+
+```text
+ucd init --service libby-overdrive --library-card phoenix
+```
+
+The shared setup pattern should also accommodate
+`ucd init --service marvel-unlimited`, with saved authentication replacing the
+need for a manually supplied cookies file. Marvel login/authentication research
+and implementation are separate work; this is an agreed interface direction,
+not a claim of current support.
+
+## Download, output, and failure policy
+
+Only download titles already checked out on the selected/matching card. UCD
+must not borrow automatically. A missing active checkout is a title failure.
+Only the supported OverDrive Read fixed-layout image rendition is accepted;
+MediaDo, reflowable books, and other delivery formats fail explicitly.
+
+Process multiple title IDs sequentially in command-line order. This is an
+agreed command-layer rule for all input adapters, not Libby-only scheduling.
+By default a title failure stops processing. `--continue-on-error` reports
+that failure and moves to the next title, preserving successful downloads;
+the final exit status is nonzero if any title failed. Authentication failures
+always stop the entire command regardless of that option.
+
+`download` defaults to CBZ output. `--output-format cbz` selects it explicitly;
+other values fail as unsupported until another output format is implemented.
+Use Marvel's existing output filename convention and `--output-dir` option.
+Mirror its handling of existing output: without `--overwrite`, report a
+successful skip and proceed without acquiring image assets. `--refresh`
+controls image acquisition independently and does not authorize overwriting
+an output file.
+
+For titles being acquired, fetch current loan, BIF, and Thunder metadata on
+every run, even when all image assets can be reused. Metadata establishes the
+current checkout, rendition structure/order, and bibliographic values.
+Retain each successfully verified image if a later acquisition fails so that
+a rerun can reuse it. Publish the final CBZ only after all required assets and
+metadata are complete; do not leave a partial destination CBZ on failure.
+
+## Shared asset cache and reuse policy
+
+Use one discoverable cache root for all services, with readable service and
+title directories, for example:
+
+```text
+ucd/
+  libby-overdrive/
+    11103570 — Mecha-Ude Mechanical Arms Volume 1/
+  marvel-unlimited/
+    39895 — Title/
+```
+
+Use the platform's standard cache location, allow an explicit location override,
+and provide `ucd cache where` to display the root. Exact platform paths and
+option spelling for the override remain implementation decisions. Sanitize
+readable title labels for the filesystem; service/title identifiers establish
+identity, so title changes must not orphan acquisitions or make a second
+logical cache identity.
+
+Within a title directory, keep exact image objects identified by SHA-256 and
+versioned acquisition manifests recording roles, component associations,
+original safe asset paths, reading order, properties, and fetch times. This
+layout is a usability decision, not a general Repository schema or a change
+to the distinction between source objects and logical Pages. Credentials never
+belong in the asset cache.
+
+SHA-256 identifies the exact stored bytes independently of the acquisition
+URL, card, or session. A provider lookup is a separate association used to
+avoid refetching bytes. The proposed lookup comprises title ID, a reliable
+rendition identity, and original image asset path; do not use spine position.
+Before enabling reuse, compare rendition/asset identifiers across at least two
+sessions. If stability or rendition identity cannot be established, fetch
+again and deduplicate against existing objects by SHA-256 afterward.
+
+When identifiers are validated, follow Marvel's reuse policy: use fresh
+metadata to locate acquisitions, verify local object hashes before reuse,
+and refetch missing/corrupt objects. `--refresh` bypasses reuse. A replacement
+served under unchanged provider identifiers may remain undetected until
+refresh if the service supplies no trustworthy hash or revision marker.
+Locally calculated SHA-256 alone cannot establish the freshness of an asset
+that has not been fetched.
+
+## Remaining research before implementation
+
+Verify direct authentication and loan-opening/fulfillment for this supported
+rendition without the browser. Establish reliable rendition and image lookup
+identifiers across sessions before enabling network-saving reuse. Define the
+versioned internal acquisition manifest and deterministic synthetic fixtures;
+keep the full manga fixture and all secrets out of Git. These are remaining
+research and implementation-contract tasks, not reasons to require a manual
+capture bundle in the agreed CLI workflow.
+
+## Sanitized acquisition and capture metadata
 
 Retain reader metadata and catalog metadata separately so their original
 meaning and source precedence remain inspectable. Use an allowlist for BIF
@@ -238,7 +384,7 @@ where they overlap so disagreements can be inspected rather than erased.
 
 | UCD concept | Source and rule |
 |---|---|
-| Service | Proposed adapter identity `libbyOverdriveRead` |
+| Service | CLI service selector `libby-overdrive`; Python adapter `LibbyOverDriveReadAdapter` (internal service-field spelling remains to be settled) |
 | Service title ID | Thunder `id`, matched to the captured title |
 | Public source URL | Share URL constructed from the title ID |
 | Service series ID | Thunder `detailedSeries.seriesId`, when present |
