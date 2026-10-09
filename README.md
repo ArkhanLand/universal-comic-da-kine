@@ -140,3 +140,7 @@ process.
 Wrap Markdown prose, comments, and docstrings at 78 columns, including comment
 markers. Preserve code blocks, tables, and unbreakable URLs/identifiers when
 wrapping would change meaning. Python code uses the configured 100 columns.
+
+Keep verbose pytest result lines within 80 columns, counting the module path,
+test name, parameter ID, status, and progress suffix. Use short, descriptive
+parameter IDs rather than automatically generated source snippets or URLs.
