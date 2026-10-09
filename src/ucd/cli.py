@@ -138,20 +138,20 @@ def list_loans(
         typer.echo("Checking saved library connections and active loans…")
         with httpx.Client(timeout=30, follow_redirects=False) as http_client:
             loans = store.active_loans(
-                LibbyClient(http_client, progress=typer.echo), name=library_card,
+                LibbyClient(http_client, progress=typer.echo),
+                name=library_card,
             )
         if not loans:
             typer.echo("No active checkouts found.")
         for connection, loan in loans:
+
             def text(value: object) -> str:
                 return re.sub(r"[\x00-\x1f\x7f]", " ", str(value))
 
             kind = loan.get("type")
             format_record = loan.get("overDriveFormat")
             format_id = (
-                format_record.get("id", "unknown")
-                if isinstance(format_record, dict)
-                else "unknown"
+                format_record.get("id", "unknown") if isinstance(format_record, dict) else "unknown"
             )
             kind_id = kind.get("id", "unknown") if isinstance(kind, dict) else "unknown"
             typer.echo(
@@ -194,14 +194,24 @@ def inspect_loan(
             connection, session, _ = store.select_loan(client, title_id, name=library_card)
             typer.echo(f"Active checkout found on {connection.name}.")
             typer.echo("Opening OverDrive Read loan…")
+
             def save_renewed(updated_session: Session) -> None:
                 credentials = store.credentials(connection)
-                store.save(connection.name, connection.library, Credentials(
-                    credentials.card_number, credentials.pin, updated_session,
-                ))
+                store.save(
+                    connection.name,
+                    connection.library,
+                    Credentials(
+                        credentials.card_number,
+                        credentials.pin,
+                        updated_session,
+                    ),
+                )
 
             passport = client.open_loan(
-                connection.library, session, title_id, session_renewed=save_renewed,
+                connection.library,
+                session,
+                title_id,
+                session_renewed=save_renewed,
             )
         typer.echo("Establishing reader connection and decoding openbook…")
         # Separate cookie jar: no API credentials are forwarded to the reader.

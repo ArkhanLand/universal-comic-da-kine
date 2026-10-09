@@ -141,9 +141,7 @@ def decode_openbook(html: str, buid: str) -> dict[str, Any]:
             raise ValueError
         return openbook
     except (ValueError, UnicodeError, OverflowError):
-        raise ServiceResponseError(
-            "Cannot decode the reader's openbook envelope."
-        ) from None
+        raise ServiceResponseError("Cannot decode the reader's openbook envelope.") from None
 
 
 def _read_url(url: str, *, origin: str | None = None) -> str:
@@ -153,18 +151,14 @@ def _read_url(url: str, *, origin: str | None = None) -> str:
             parts.scheme == "https"
             and parts.username is None
             and parts.password is None
-            and re.fullmatch(
-                r"dewey-[a-z0-9-]+\.read\.libbyapp\.com", parts.hostname or ""
-            )
+            and re.fullmatch(r"dewey-[a-z0-9-]+\.read\.libbyapp\.com", parts.hostname or "")
             and parts.port in (None, 443)
             and not parts.fragment
         )
     except ValueError:
         valid = False
     if not valid:
-        raise ServiceResponseError(
-            "Fulfillment did not provide a recognized HTTPS read host."
-        )
+        raise ServiceResponseError("Fulfillment did not provide a recognized HTTPS read host.")
     current_origin = f"https://{parts.hostname}"
     if origin is not None and current_origin != origin:
         raise ServiceResponseError("Reader handshake redirected outside its read host.")
@@ -185,9 +179,7 @@ class ReadRendition:
         if any(not isinstance(entry, dict) for entry in spine):
             raise ServiceResponseError("Openbook has a malformed spine.")
         if any(entry.get("rendition-layout") != "pre-paginated" for entry in spine):
-            raise UnavailableError(
-                "This rendition is not supported fixed-layout OverDrive Read."
-            )
+            raise UnavailableError("This rendition is not supported fixed-layout OverDrive Read.")
         if any(not isinstance(entry.get("linear"), bool) for entry in spine):
             raise ServiceResponseError("Openbook lacks explicit spine linearity.")
         nav = self.openbook.get("nav")
@@ -195,20 +187,15 @@ class ReadRendition:
         if not isinstance(landmarks, list):
             raise ServiceResponseError("Openbook has no cover landmarks.")
         covers = [
-            item
-            for item in landmarks
-            if isinstance(item, dict) and item.get("type") == "cover"
+            item for item in landmarks if isinstance(item, dict) and item.get("type") == "cover"
         ]
         if len(covers) != 1:
-            raise ServiceResponseError(
-                "Openbook does not identify one unambiguous cover."
-            )
+            raise ServiceResponseError("Openbook does not identify one unambiguous cover.")
         target = str(covers[0].get("path", "")).split("#", 1)[0]
         matched = [
             entry
             for entry in spine
-            if target
-            in (entry.get("path"), entry.get("-odread-original-path"), entry.get("id"))
+            if target in (entry.get("path"), entry.get("-odread-original-path"), entry.get("id"))
         ]
         if not target or len(matched) != 1 or matched[0]["linear"] is not False:
             raise ServiceResponseError("Cover landmark and spine semantics disagree.")
@@ -218,9 +205,7 @@ class ReadRendition:
             "cover_components": 1,
             "narrative_components": sum(entry["linear"] for entry in spine),
             "nonlinear_components": sum(not entry["linear"] for entry in spine),
-            "reading_direction": direction
-            if direction in ("ltr", "rtl")
-            else "unknown",
+            "reading_direction": direction if direction in ("ltr", "rtl") else "unknown",
         }
 
 
@@ -253,9 +238,7 @@ class OverDriveReadClient:
                 "Read-host authorization failed; rerun ucd init --service libby-overdrive."
             )
         if response.is_error:
-            raise ServiceResponseError(
-                f"Read-host request failed (HTTP {response.status_code})."
-            )
+            raise ServiceResponseError(f"Read-host request failed (HTTP {response.status_code}).")
         return response
 
     def fetch_openbook(self, passport: dict[str, Any]) -> ReadRendition:
@@ -263,9 +246,7 @@ class OverDriveReadClient:
         web = urls.get("web") if isinstance(urls, dict) else None
         message = passport.get("message")
         if not isinstance(web, str) or not isinstance(message, str) or not message:
-            raise ServiceResponseError(
-                "Loan passport lacks read-host fulfillment information."
-            )
+            raise ServiceResponseError("Loan passport lacks read-host fulfillment information.")
         origin = _read_url(web)
         parsed = urlsplit(web)
         if parsed.query:
@@ -276,9 +257,7 @@ class OverDriveReadClient:
             if response.is_redirect:
                 location = response.headers.get("Location")
                 if not location:
-                    raise ServiceResponseError(
-                        "Reader handshake redirect has no target."
-                    )
+                    raise ServiceResponseError("Reader handshake redirect has no target.")
                 url = urljoin(url, location)
             else:
                 break
@@ -286,9 +265,7 @@ class OverDriveReadClient:
             raise ServiceResponseError("Too many redirects during reader handshake.")
         response = self._get(web, origin)
         if response.status_code != 200:
-            raise ServiceResponseError(
-                "Reader page was not available after fulfillment."
-            )
+            raise ServiceResponseError("Reader page was not available after fulfillment.")
         buid = (parsed.hostname or "").split(".")[0].removeprefix("dewey-")
         rendition = ReadRendition(web, decode_openbook(response.text, buid))
         rendition.summary()  # Refuse unsupported or ambiguous structure immediately.
