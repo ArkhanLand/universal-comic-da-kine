@@ -12,6 +12,7 @@ requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dependencies = [
     "httpx>=0.28.1",
+    "keyring>=25",
     "Pillow>=11",
     "typer>=0.27.2",
 ]

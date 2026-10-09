@@ -67,6 +67,93 @@ tests. See `tests/test_marvel.py`, `tests/test_marvel_cache.py`,
 `tests/test_pages.py`, and `tests/test_cbz.py`. Do not assume planned
 repository objects exist.
 
+## Initial Libby connection support
+
+This section describes the unmerged prototype in the
+`feat/libby-authentication` working checkout as of 2026-10-09. These commands
+are not yet available from the main checkout or a released UCD installation.
+The live validation status of each path is noted below.
+
+`ucd init --service libby-overdrive` now provides the initial setup path:
+resolve the library key, prompt privately for a card number and PIN, verify
+service authentication, and save credentials/session tokens in a supported
+system credential store through `keyring`. `--library-card <name>` names or
+updates a connection; without it, the library key is the default name and a
+duplicate requires a distinct name. Ordered, versioned non-secret connection
+configuration is separate from the image cache.
+
+`ucd.auth.libby` implements direct device creation, card linking,
+session verification/renewal, active-loan lookup across saved cards, and
+OverDrive Read passport requests. Missing or expired loans are rejected;
+credential rejection stops card lookup and instructs the user to rerun setup.
+The observed client version is explicit and service upgrades require review.
+The web gateway `sentry.libbyapp.com` is used instead of the legacy
+`sentry-read.svc.overdrive.com` host, whose certificate failed hostname
+verification during live setup. TLS verification is retained, and raw service
+errors or credential-bearing URLs are not exposed in diagnostic messages.
+See [third-party notices](../THIRD_PARTY_NOTICES.md).
+
+The official client's Sentry request transform supplies a required,
+token-derived `Accept-Language` header for `POST /chip`. Ordinary language
+headers could produce a token that listed loans but could not open them.
+The implemented transform and the complete observed sequence are documented
+in [the verified browser-free protocol](libby-overdrive-read.md#verified-browser-free-protocol).
+Device cloning, blessing transfers, and the experimental
+`UCD_LIBBY_AUTH_MODE` setup switch were removed; they are not part of the
+current card-number/PIN setup path.
+
+The working-branch prototype includes
+`ucd list-loans --service libby-overdrive`, intended to list active checkouts
+in saved-card preference order with title IDs, readable card names, and delivery
+formats. Command registration/help and synthetic tests have been checked. A live check
+on 2026-10-09 listed three active checkouts on the selected Phoenix connection;
+this command is not yet merged.
+It omits expired loans and credentials. `--library-card <name>` restricts the
+lookup to one saved connection. Authentication failures stop the whole command.
+
+`UCD_DEV_COMMANDS=1 ucd inspect-loan --service libby-overdrive <title-id>`
+is a development/testing diagnostic, registered only when `UCD_DEV_COMMANDS`
+is exactly `1` at process startup. Otherwise it is absent from both help and
+command dispatch. Normal downloads will perform these checks internally;
+users do not need a separate inspection step. In the prototype, `list-loans` is registered
+without the development flag.
+
+The inspection command exercises saved-card lookup and passport acquisition,
+establishes a separate read-host cookie jar, and decodes the embedded openbook
+without executing service JavaScript. The live comic reader passed its encoded
+string array as an argument to a function that assigns `window.eData`, rather
+than assigning the array directly. The parser recognizes that observed wrapper
+as well as direct arrays; it rejects expressions and inconsistent bindings.
+It validates fixed layout, cover landmarks, and explicit linearity, then
+reports only counts and reading direction. It prints no tokens, signed URLs,
+or raw loan/openbook payloads and downloads no images.
+`--library-card <name>` selects a saved connection explicitly.
+
+The official `dewey-22.1.2/src/main.js` Sentry `_requestWithChip` handler
+responds to `missing_chip` by renewing the existing device and retrying once.
+UCD mirrors this bounded recovery at loan opening, verifies that renewal
+retains the device and selected card, and persists the replacement identity
+in the credential store. A repeated rejection remains a hard failure. This
+does not relink the card, create another device, or prompt for credentials.
+The corrected chip header is required on this renewal too. The private `prbn`
+claim's meaning remains unknown; its absence is not an invalid identity.
+
+A live UCD inspection passed on 2026-10-09 for title `11103570`, reporting
+193 spine components, one non-linear cover, 192 linear narrative components,
+and `rtl` progression. The check verified saved-session renewal, loan opening,
+reader access, envelope decoding, and rendition validation. A subsequent fresh
+`ucd init --service libby-overdrive --library-card phoenix` followed by
+inspection also passed, verifying device creation, card/PIN linking, renewal,
+credential storage, and reader inspection without reusing the repaired session. These results supplement the
+synthetic authentication and reader tests; they do not prove complete Libby
+download support.
+
+CSS image mapping, exact-byte image acquisition, catalog metadata integration,
+cache reuse, normalization, and download routing still need implementation or
+verification. The `download` command continues to use Marvel. Marvel setup is
+also not implemented. See [the Libby retrieval design](libby-overdrive-read.md)
+for the agreed target and the exact protocol reproduction steps.
+
 ## Target contract
 
 The Python API uses `Publication` and `get_publication()` throughout the

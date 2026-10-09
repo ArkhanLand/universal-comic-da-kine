@@ -4,7 +4,14 @@
 
 This document records observed retrieval behavior and the proposed acquisition
 boundary and agreed CLI workflow for Libby titles delivered through OverDrive
-Read. It adds no adapter, CLI routing, or stable acquisition manifest schema. The existing
+Read. Browser-free saved-session renewal, loan opening, reader access, and
+openbook inspection passed live checks, including fresh card/PIN setup,
+on 2026-10-09 in the unmerged
+`feat/libby-authentication` working checkout. These commands are not yet part
+of main or a released installation. The reproducible protocol
+is recorded below and summarized in
+[the adapter guide](adapters.md#initial-libby-connection-support). Full download
+routing and a stable acquisition manifest schema remain unimplemented. The existing
 [core design](design.md) and [adapter contract](adapters.md) apply.
 
 The investigated rendition was *Mecha-Ude: Mechanical Arms, Volume 1*,
@@ -169,14 +176,15 @@ Manual browser capture is a research/reference-fixture path, not a required
 user step or the normal adapter input. In the investigation, a cross-origin
 reader frame could not use the directory picker; a generated ZIP supplied a
 working transport. That successful capture established mapping and exact-byte
-retrieval inside an authorized session. It did not verify standalone UCD
-loan fulfillment. Direct authentication and fulfillment must be validated
-before claiming browser-free download support.
+retrieval inside an authorized session. The later standalone UCD check verified
+loan opening and reader metadata retrieval, as detailed below. That check did
+not download images or produce a Publication/CBZ; full browser-free download
+support must still be implemented and validated.
 
 The locally installed npm package `libby-archiver` 0.4.0 provides a concrete
 research starting point. Its setup resolves a library key, links a card using
-its number and PIN, bootstraps a reusable identity through chip/sync-code
-operations, and caches a session token. These are observations from its source,
+its number and PIN, attempts to bootstrap a reusable identity through chip and
+sync-code operations, and caches a session token. These are observations from its source,
 not a supported service API or a commitment to copy its implementation. Its
 automatic insecure-TLS fallback must not be copied; certificate verification
 remains enabled. The package's extraction stalled at 0/193 for the investigated
@@ -222,6 +230,319 @@ The shared setup pattern should also accommodate
 need for a manually supplied cookies file. Marvel login/authentication research
 and implementation are separate work; this is an agreed interface direction,
 not a claim of current support.
+
+## Verified browser-free protocol
+
+The following path was verified on 2026-10-09 against title `11103570` using
+Libby's client version `22.1.2`. UCD renewed a saved identity, opened the active
+loan, established reader access, decoded openbook, and reported 193 spine
+components: one non-linear cover, 192 linear narrative components, and explicit
+`rtl` progression. No image assets were downloaded by this check. Fresh
+card-number/PIN setup also passed after the header fix: `ucd init` created,
+linked, renewed, verified, and saved a new session, and a following inspection
+returned the same counts and direction without a renewal retry.
+
+These are private, observed endpoints and formats. The implementation locations
+are `src/ucd/auth/libby.py` and `src/ucd/input/libby_overdrive_read.py`; their
+synthetic tests are `tests/test_libby_auth.py` and `tests/test_libby_read.py`.
+The public official-client source examined was
+[`dewey-22.1.2/src/main.js`](https://libbyapp.com/dewey-22.1.2/src/main.js).
+Recheck the protocol when the service changes rather than assuming these
+observations apply to every version or delivery mechanism.
+
+### Gateway, library lookup, and card linking
+
+Use `https://sentry.libbyapp.com` for the API with normal TLS and hostname
+verification. The legacy `sentry-read.svc.overdrive.com` resolved, but presented
+a certificate for `*.odrsre.overdrive.com` that did not cover that hostname.
+Disabling verification is not the remedy. The speculative replacement
+`sentry-read.odrsre.overdrive.com` did not resolve and is not an established
+endpoint.
+
+Resolve the setup slug through Thunder's
+`GET https://thunder.api.overdrive.com/v2/libraries/<key>`. The observed
+`phoenix` lookup identifies Greater Phoenix Digital Library, `websiteId=34`.
+The official client obtains authentication choices through
+`GET /auth/forms/<website-id>`. This consortium returned several local ILS
+choices; `ilsName=phoenix` specifically means Phoenix Public Library. A catalog
+lookup slug is not a general substitute for the selected form's `ilsName`.
+Current UCD submits the lookup key; that shortcut was confirmed for this card,
+not for arbitrary consortium members.
+
+The direct setup sequence is:
+
+1. `POST /chip?c=d:22.1.2&s=0`, with no bearer token, creates a device. Keep
+   the response's `chip` and `identity` in memory. `chip` is a device identifier;
+   `identity` is the bearer JWT, not a TCP connection.
+2. `POST /auth/link/<website-id>` with `Authorization: Bearer <identity>`
+   links the card. Send JSON with `ils` set to the chosen ILS name, `username`
+   set to the card number, and `password` set to the PIN/passcode. The observed
+   successful browser request used `ils=phoenix` and no `captcha` field.
+   Additional authentication requirements must be handled explicitly if a
+   different library returns them.
+3. Renew the same device with `POST /chip?c=d:22.1.2&s=0&v=<device-prefix>`,
+   authenticated with the current identity and the special header below.
+   `v` is the first hyphen-delimited segment of the full device ID; retain the
+   full ID for consistency checks.
+4. Require the response's `chip` and the replacement JWT's `chip.id` to match
+   the existing full device ID. Require the expected card association, then
+   verify `GET /chip/sync` with the replacement bearer token. The response must
+   have `result=synchronized` and a loan list before saving the session.
+
+UCD's fresh bootstrap currently requires one unambiguous linked-card tuple.
+Observed tuple positions used by the implementation are card ID at index 1,
+website ID at index 4, and the canonical linked-card library key at index 5.
+The last key can differ from the setup slug: this card used
+`phoenix-phoenixpl`. Other tuple positions remain undocumented; do not invent
+normalized fields from them. Existing-device renewal checks that the selected
+card remains present rather than requiring every device to have only one card.
+
+API requests use `Accept: application/json`, `Origin: https://libbyapp.com`,
+and a desktop user agent; JSON card-link requests have the corresponding
+content type. Normal browser language headers and user-agent imitation alone
+did not fix renewal. No Cookie header was present on the observed successful
+browser renewal; UCD keeps the API requests bearer-only and uses a separate
+cookie jar for reader fulfillment. There was no Authorization response header:
+the replacement identity is in the `/chip` JSON response.
+
+### Required `/chip` request header
+
+The decisive difference is the official Sentry request transformation in
+`obf/shib.js`, called by `app/base/services/service-sentry`. Chip acquisition
+sets the internal request marker `path="chip"`. The transformation consumes
+that marker and overwrites the outgoing **`Accept-Language`** header with two
+characters derived from the current identity. The marker is not an additional
+HTTP query parameter.
+
+For a fresh device with neither identity nor chip, use the public fixed seed
+`cudlkahllcnsjxhbmddl`; its derived header is `bh`. For renewal, use the entire
+current JWT string, including its encoded segments and signature, without the
+`Bearer ` prefix. This documentation example reproduces the transformation:
+
+```python
+import re
+
+seed = current_identity or "cudlkahllcnsjxhbmddl"
+accept_language = re.sub(r"[^a-z]", "", seed)[::-1][4:6]
+```
+
+Keep only characters already in ASCII `a` through `z`; do not lowercase the
+input or derive the value from decoded JWT claims. Reverse the filtered string
+and take indices 4 and 5. Four is the length of the internal `chip` path marker.
+Recompute for each chip request using the identity sent in that request. Apply
+this transformation to chip creation/renewal, not indiscriminately to card
+linking, loan opening, Thunder, or read-host resource requests. The current
+Python implementation does this for `POST /chip`.
+
+The official source also has a chip-without-identity seed branch and an
+automation-dependent alternative. Those branches were not needed to establish
+UCD's working path and are not interchangeable with normal identity renewal.
+In particular, the source's speculative `r=<full-chip>` recovery path returned
+HTTP 400 in this investigation and is not implemented as UCD's renewal fallback.
+
+A controlled live comparison renewed the same browser-created identity with
+ordinary headers and with only this header changed. Ordinary headers returned
+one card and `prbn=v`; the token-derived header returned the same device and
+card with no `prbn` field. Correcting the header also removed `prbn` from the
+saved UCD identity. UCD subsequently opened the loan successfully. This
+establishes the request requirement. We call the transformation **client
+validation**: reproducing the official request behavior in addition to holding
+a bearer token. It introduces no independent secret. Discouraging alternate
+clients is a plausible purpose, but the service's intent is not confirmed.
+The meaning of `prbn`, `pri`, or `ag` remains unknown. An absent `prbn` field
+is not an invalid identity. Temporary token-claim summaries used during this
+investigation have been removed from CLI output; normal progress messages and
+rendition inspection results remain.
+
+
+### Loan lookup, opening, and bounded renewal
+
+Use fresh `/chip/sync` data to find the requested title on the selected card
+and require a valid, future loan expiry. Missing or expired checkouts must
+fail without borrowing. Require the supported OverDrive Read delivery format
+before opening; fixed layout is checked after decoding the rendition.
+
+Build the opening request as
+`GET /open/book/card/<card-id>/title/<title-id>` with the saved bearer token
+and query parameters `t` and `website_id`. `t` is standard Base64 of UTF-8 JSON
+with this structure; angle-bracket values are placeholders, not literal data:
+
+```json
+{
+  "codex": {
+    "title": {"titleId": "<title-id>", "slug": "<title-id>"},
+    "loan": {
+      "psnKey": "<card-id>-<title-id>",
+      "slug": "<card-id>-<title-id>"
+    },
+    "library": {"key": "<linked-card-library-key>", "name": "<library-name>"}
+  },
+  "dewey-url": "https://libbyapp.com",
+  "spec": "V31"
+}
+```
+
+Use the canonical key from the tuple matched to this card and website, not an
+unrelated card or the catalog lookup slug. The browser codex also contained
+cover/logo/color fields; UCD's smaller structure above succeeded without them.
+The implementation adds `Sec-Fetch-Site: same-site` and `Sec-Fetch-Mode: cors`
+when opening the loan. All URLs, encoded loan context, and bearer tokens remain
+transient.
+
+Linking a card does not mutate a JWT already held by the caller. The fresh
+browser's first opening request used a token with no card claims and `prbn=i`:
+HTTP 403, `result=missing_chip`. It renewed the same device, received a token
+with the card and no `prbn`, then retried successfully with HTTP 200. The
+initial failure and subsequent success did not identify different devices.
+
+UCD mirrors the official `_requestWithChip` handler: on `missing_chip`, renew
+that existing identity with the correct header, validate the device and
+selected card, persist the replacement identity in the credential store, and
+retry the same opening request once. Repeated rejection is a hard failure;
+other credential failures do not trigger this retry. This is token renewal,
+not a reason to clone devices, relink the card, prompt for credentials, or
+borrow a title. A successful loan list alone does not prove the identity can
+open a loan.
+
+Cloning was a false lead from the npm reference. Both direct linking and
+cloning could list loans while opening failed. A clone-code experiment returned
+`result=cloned` and the original chip, rather than the blessing expected by a
+different official UI transfer flow. Neither switching device tokens nor
+copying ordinary browser headers solved the failure. UCD removed the cloning,
+blessing, and `UCD_LIBBY_AUTH_MODE` experiments after the header was verified.
+Do not reintroduce them as prerequisites for card-number/PIN authentication.
+
+### Reader handshake and embedded metadata
+
+The successful opening response is a transient passport with `urls.web` and
+`message`. `urls.web` identifies the authorized
+`https://dewey-<buid>.read.libbyapp.com/` reader location; `message` is the
+fulfillment query string. Keep both private. With a separate HTTP client and
+cookie jar, request `urls.web + "?" + message`, retain any reader cookies, and
+follow the allowed read-host redirects. The current client permits at most
+eight handshake responses, checks every redirect before requesting it, and
+rejects a different origin, non-HTTPS URL, embedded credentials, or a different
+delivery host. An HTTP 200 handshake is valid; a redirect is not required.
+
+After the handshake, request the clean `urls.web` URL using that cookie jar
+and require HTTP 200. API bearer Authorization must never be forwarded to the
+reader host. Current reader requests use a desktop user agent,
+`Origin: https://libbyapp.com`, and `Accept: text/html`. The page can contain
+encoded openbook even if the literal word `openbook` does not appear in HTML.
+
+The fixed-layout reader's live page did **not** assign a literal array directly
+to `window.eData`. It used the following wrapper, with the actual encoded
+strings replaced here by placeholders:
+
+```javascript
+(function (d) {
+  try {
+    Object.defineProperty(window, 'eData', {
+      value: d,
+      writable: true,
+      enumerable: true,
+      configurable: true
+    });
+  } catch (e) {
+    window.eData = d;
+  }
+})(["<encoded string>", "<encoded string>"]);
+```
+
+`d` is the function parameter bound to the literal invocation argument. It is
+not an ordinary `d=[...]` assignment elsewhere in the script. Searching the
+whole HTML for `d=` found unrelated loop counters and accidental matches in
+encoded strings. Do not use those matches to reconstruct metadata.
+
+Recognize either the direct `window.eData=[...]` form or this observed wrapper.
+For the wrapper, verify that the function parameter, `value` property, and
+fallback assignment reference the same identifier, then extract the literal
+array passed to the invocation. Parse quoted strings and escapes only; reject
+expressions, function calls, malformed literals, and inconsistent bindings.
+Never evaluate the reader script. Brackets inside quoted strings do not end
+the array. Do not require `SPARK.bifocalPath` to immediately follow the array;
+other assignments or the wrapper can intervene. The npm parser's direct-array
+regular expression did not recognize this live comic-reader form.
+
+### Decoding the extracted string array
+
+Derive `buid` from the read-host hostname by removing `dewey-` and the remaining
+host suffix. Preserve the entire intervening value, including any hyphens;
+it is transient rendition context, not a publication or asset ID.
+
+Decode as follows, matching `decode_openbook()`:
+
+1. Decode the quoted JavaScript string literals, including supported standard,
+   hexadecimal (`\xHH`), and Unicode (`\uHHHH`) escapes. Concatenate the
+   resulting array elements using one double-quote character (`"`) between
+   elements. Do not simply concatenate without a separator.
+2. Reverse `buid` to form the repeating key. For each character at zero-based
+   index `i`, take key character `key[i % len(key)]` and the character code.
+3. If the key character is `1` through `9`, add `(i + int(key_character)) % 94`.
+   If the resulting code exceeds 126, replace it with `(code % 126) + 32`.
+   Key character `0` and nonnumeric characters leave the code unchanged.
+4. Strictly Base64-decode the transformed string, decode UTF-8, and parse JSON.
+   Require the outer value to be an object and its `b` member to be an object.
+   That `b` object is the decoded openbook/BIF map.
+5. Validate the rendition before interpreting it: a nonempty spine, supported
+   fixed layout (`rendition-layout=pre-paginated`), explicit boolean `linear`
+   values, and one unambiguous cover landmark matching a non-linear component.
+   Reading direction comes from the explicit openbook property, not filename
+   order or the direction of the decoding key.
+
+The decoded object can contain fulfillment secrets alongside safe metadata.
+Apply the allowlist below before retaining anything; successful decoding does
+not make wholesale serialization safe. No decryption or re-encoding of image
+JPEGs was needed in the earlier browser capture. CSS-to-image mapping and exact
+image fetching remain separate from decoding this metadata envelope.
+
+### Reproduction and validation
+
+With UCD installed from this checkout and a supported credential store:
+
+```bash
+ucd init --service libby-overdrive --library-card phoenix
+UCD_DEV_COMMANDS=1 ucd inspect-loan --service libby-overdrive 11103570
+```
+
+The working branch also contains a `list-loans` prototype with synthetic tests
+and verified command registration. A live check on 2026-10-09 listed three
+active checkouts on the selected Phoenix connection, including title IDs,
+titles, and delivery formats, without borrowing or downloading. It is still
+unmerged. Listing is optional when reproducing inspection:
+
+```bash
+ucd list-loans --service libby-overdrive --library-card phoenix
+```
+
+Enter credentials only in the setup command's hidden prompts. An existing
+valid connection can start at inspection; a saved token may first need the
+bounded renewal described above. The successful inspection reported:
+
+```text
+Spine components: 193
+Cover components: 1
+Narrative components: 192
+Nonlinear components: 1
+Reading direction: rtl
+Loan inspection complete. No image files were downloaded.
+```
+
+The synthetic tests cover initial/renewed chip headers, unchanged device/card
+associations, bounded retry, credential handling, reader-cookie isolation,
+direct and wrapped arrays, quoted brackets and escapes, rejected executable
+expressions, layout/cover validation, and explicit direction. Run them with:
+
+```bash
+python -m pytest tests/test_libby_auth.py tests/test_libby_read.py
+```
+
+Use live checks to verify service behavior; mocked tests alone did not expose
+the missing header or the wrapper. For comparison diagnostics, keep tokens and
+signed URLs in hidden local prompts and report only status, structural names,
+counts, and equality checks. Local source viewing helped identify the wrapper,
+but raw reader HTML, encoded arrays, and full network logs must remain outside
+Git and persisted acquisition metadata.
 
 ## Download, output, and failure policy
 
@@ -297,13 +618,15 @@ that has not been fetched.
 
 ## Remaining research before implementation
 
-Verify direct authentication and loan-opening/fulfillment for this supported
-rendition without the browser. Establish reliable rendition and image lookup
-identifiers across sessions before enabling network-saving reuse. Define the
-versioned internal acquisition manifest and deterministic synthetic fixtures;
-keep the full manga fixture and all secrets out of Git. These are remaining
-research and implementation-contract tasks, not reasons to require a manual
-capture bundle in the agreed CLI workflow.
+The browser-free saved-session path through decoded rendition inspection is
+verified, including a fresh setup and subsequent inspection. Implement and
+validate CSS-to-image mapping, exact-byte fetching, catalog
+metadata acquisition, normalization, and download/output routing. Establish
+reliable rendition and image lookup identifiers across sessions before enabling
+network-saving reuse. Define the versioned internal acquisition manifest and
+extend deterministic synthetic fixtures; keep the full manga fixture and all
+secrets out of Git. These are remaining research and implementation-contract
+tasks, not reasons to require a manual capture bundle in the agreed CLI workflow.
 
 ## Sanitized acquisition and capture metadata
 
