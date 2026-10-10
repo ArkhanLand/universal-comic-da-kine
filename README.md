@@ -91,6 +91,45 @@ Authentication failures always stop. Existing output files are successful
 skips unless `--overwrite` is supplied. CBZs are published only after writing
 completes. `--output-format cbz` is the only supported output format.
 
+Downloads show the title once and a compact image progress bar. Libby also
+shows measured component-mapping progress before fetching images. Interactive
+bars fit the terminal width; redirected output records each phase's start and
+completion. The title appears before Libby's preliminary status line,
+`Gathering metadata`, which adds a dot per setup milestone. Redirected output
+gets one setup summary. Setup commands still report their steps individually.
+
+For network downloads, `--workers N` overlaps up to N image fetches at once
+(any positive integer, default 1). Libby also uses that count when fetching
+component documents.
+Authentication stays sequential, and books are processed in input order. Page
+order, original bytes, and the progress display stay the same. Marvel reuses
+verified cached images unless `--refresh` is supplied. Use `--workers 1` for a
+sequential comparison. Local CBZ imports retain their existing serial flow.
+
+Choose a worker count for the size of the book and your connection:
+
+- For a typical 27–36-page comic, start with `--workers 8`. Our 32-image
+  Marvel issue took 13.882s with one worker and 1.191s with eight. Sixteen
+  took 1.058s and 32 took 1.220s, so eight delivered nearly all the benefit.
+- For a manga around 200 pages, try `--workers 16` or `--workers 32`. Our
+  three-volume Libby batch (590 images total) took 116.149s with four,
+  57.566s with eight, 37.134s with sixteen, and 24.087s with 32 workers.
+  Larger pools substantially improved the whole download, including mapping.
+- Compare elapsed time using `time` and keep `--refresh` enabled for network
+  comparisons. Use `--overwrite` or separate output folders so existing CBZs
+  do not cause a skip. If additional workers stop helping or requests fail,
+  reduce the count.
+
+These are starting points from single live runs on an Apple M1 Max MacBook
+Pro with 32 GiB RAM. Results depend on network latency, bandwidth, and provider
+behavior; CPU core count does not determine the number of concurrent requests.
+The default remains one worker, and any positive count can be selected.
+
+Keep concurrency reasonable and respect the provider's usage policies.
+Excessive parallel requests to Marvel, Libby, or another service may be treated
+as network abuse and lead to throttling, blocked access, or account suspension.
+The absence of a worker ceiling is not permission to overwhelm a service.
+
 `ucd cache where` displays the shared cache root. Use `--cache-dir PATH` or
 `UCD_CACHE_DIR` to override it. Defaults are `~/Library/Caches/ucd` on macOS,
 `%LOCALAPPDATA%/ucd` on Windows, and `${XDG_CACHE_HOME:-~/.cache}/ucd` on

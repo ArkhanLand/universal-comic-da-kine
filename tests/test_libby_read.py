@@ -206,6 +206,96 @@ def test_redirect_limit():
     assert len(calls) == 8
 
 
+def test_image_cdn():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(
+                302, headers={"Location": "https://odrresources.cachefly.net/images/cover.jpg"}
+            )
+        assert "Authorization" not in request.headers
+        assert "Cookie" not in request.headers
+        return httpx.Response(200, content=b"original")
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        headers={"Authorization": "private-token", "Cookie": "read=private-cookie"},
+    )
+    reader = OverDriveReadClient(client)
+    response = reader.resource(WEB + "images/cover.jpg", WEB.rstrip("/"), image_cdn=True)
+    assert response.content == b"original"
+    assert [r.url.host for r in calls] == [
+        "dewey-a10b92.read.libbyapp.com",
+        "odrresources.cachefly.net",
+    ]
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://odrresources.cachefly.net/image.jpg",
+        "https://odrresources.cachefly.net.evil.test/image.jpg",
+        "https://user@odrresources.cachefly.net/image.jpg",
+        "https://odrresources.cachefly.net:444/image.jpg",
+        "https://odrresources.cachefly.net/image.jpg#fragment",
+        "https://dewey-other.read.libbyapp.com/image.jpg",
+    ],
+    ids=["http", "suffix", "userinfo", "port", "fragment", "reader"],
+)
+def test_image_cdn_reject(target):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(302, headers={"Location": target})
+
+    reader = OverDriveReadClient(httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ServiceResponseError):
+        reader.resource(WEB + "image.jpg", WEB.rstrip("/"), image_cdn=True)
+    assert len(calls) == 1
+
+
+def test_cdn_document_reject():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(302, headers={"Location": "https://odrresources.cachefly.net/doc"})
+
+    reader = OverDriveReadClient(httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ServiceResponseError):
+        reader.resource(WEB + "doc", WEB.rstrip("/"))
+    assert len(calls) == 1
+
+
+def test_cdn_initial_reject():
+    reader = OverDriveReadClient(
+        httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("request")))
+    )
+    with pytest.raises(ServiceResponseError):
+        reader.resource("https://odrresources.cachefly.net/image.jpg", WEB, image_cdn=True)
+
+
+def test_cdn_chain_reject():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        target = (
+            "https://odrresources.cachefly.net/image.jpg"
+            if len(calls) == 1
+            else "https://example.com/image.jpg"
+        )
+        return httpx.Response(302, headers={"Location": target})
+
+    reader = OverDriveReadClient(httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ServiceResponseError):
+        reader.resource(WEB + "image.jpg", WEB.rstrip("/"), image_cdn=True)
+    assert len(calls) == 2
+
+
 def test_reader_auth_privacy():
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(403)))
     with pytest.raises(LibbyAuthenticationError) as error:

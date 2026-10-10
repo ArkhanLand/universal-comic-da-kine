@@ -2,6 +2,7 @@ import hashlib
 import json
 from copy import deepcopy
 from io import BytesIO
+from threading import Barrier, Event
 from zipfile import ZipFile
 
 import httpx
@@ -155,6 +156,139 @@ def test_exact_order(tmp_path, monkeypatch):
         "secret=a",
     ):
         assert secret not in saved
+
+
+def test_cdn_originals(tmp_path, monkeypatch):
+    server = Server()
+    original_handler = server.handle
+
+    def handler(request):
+        if request.url.host == "odrresources.cachefly.net":
+            server.calls.append(request)
+            assert "Authorization" not in request.headers
+            assert "Cookie" not in request.headers
+            name = request.url.path.rsplit("/", 1)[1]
+            return httpx.Response(
+                200, content=server.images[name], headers={"Content-Type": "image/jpeg"}
+            )
+        if request.url.path.startswith("/images/"):
+            server.calls.append(request)
+            return httpx.Response(
+                302,
+                headers={"Location": "https://odrresources.cachefly.net" + request.url.path},
+            )
+        return original_handler(request)
+
+    server.handle = handler
+    result = server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert result.cover.path.read_bytes() == server.images["cover.jpg"]
+    assert [p.path.read_bytes() for p in result.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ]
+    capture = json.loads(next(tmp_path.glob("libby-overdrive/123/captures/*.json")).read_text())
+    assert capture["complete"]
+    for asset in capture["assets"]:
+        content = (tmp_path / "libby-overdrive/123" / asset["object"]).read_bytes()
+        assert hashlib.sha256(content).hexdigest() == asset["sha256"]
+
+
+def test_mapping_counts(tmp_path, monkeypatch):
+    server = Server()
+    adapter = server.adapter(tmp_path, monkeypatch)
+    events = []
+
+    def mapped(title, completed, total):
+        assert not any(r.url.path.endswith(".jpg") for r in server.calls)
+        events.append((title, completed, total))
+
+    adapter.mapping_progress = mapped
+    adapter.get_publication("123")
+    assert events == [("Test Book", count, 3) for count in range(4)]
+
+
+def test_parallel_book(tmp_path, monkeypatch):
+    server = Server()
+    original_handler = server.handle
+    documents = Barrier(3)
+    images = Barrier(3)
+    last_image = Event()
+
+    def handler(request):
+        if request.url.path.startswith("/html/"):
+            documents.wait(timeout=5)
+        if request.url.path.startswith("/images/"):
+            images.wait(timeout=5)
+            if request.url.path.endswith("cover.jpg"):
+                assert last_image.wait(timeout=5)
+            elif request.url.path.endswith("a.jpg"):
+                last_image.set()
+        return original_handler(request)
+
+    server.handle = handler
+    adapter = server.adapter(tmp_path, monkeypatch)
+    adapter.workers = 3
+    updates = []
+    result = adapter.get_publication("123", progress=lambda *args: updates.append(args))
+    assert result.cover.path.read_bytes() == server.images["cover.jpg"]
+    assert [p.path.read_bytes() for p in result.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ]
+    assert updates == [("Test Book", count, 3) for count in range(4)]
+    assert sum(r.url.path == "/styles/pages.css" for r in server.calls) == 1
+    capture = json.loads(next(tmp_path.glob("libby-overdrive/123/captures/*.json")).read_text())
+    assert capture["complete"]
+    assert [asset["spine_index"] for asset in capture["assets"]] == [0, 1, 2]
+
+
+def test_parallel_failure(tmp_path, monkeypatch):
+    server = Server()
+    server.fail = "z.jpg"
+    adapter = server.adapter(tmp_path, monkeypatch)
+    adapter.workers = 3
+    with pytest.raises(ServiceResponseError, match="HTTP 500"):
+        adapter.get_publication("123")
+    capture = json.loads(next(tmp_path.glob("libby-overdrive/123/captures/*.json")).read_text())
+    assert not capture["complete"]
+    assert [asset["role"] for asset in capture["assets"]] == ["cover"]
+    stored = tmp_path / "libby-overdrive/123" / capture["assets"][0]["object"]
+    assert stored.read_bytes() == server.images["cover.jpg"]
+
+
+def test_cli_workers(tmp_path, monkeypatch):
+    server = Server()
+    adapter = server.adapter(tmp_path / "cache", monkeypatch)
+
+    def factory(**kwargs):
+        adapter.workers = kwargs["workers"]
+        adapter.mapping_progress = kwargs["mapping_progress"]
+        adapter.status = kwargs["status"]
+        adapter.title_ready = kwargs["title_ready"]
+        return adapter
+
+    monkeypatch.setattr("ucd.cli.LibbyOverDriveReadAdapter", factory)
+    result = CliRunner().invoke(
+        app,
+        [
+            "download",
+            "123",
+            "--service",
+            "libby-overdrive",
+            "--workers",
+            "3",
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert adapter.workers == 3
+    assert "Mapping: 3/3 (100%)" in result.output
+    assert "Images: 3/3 (100%)" in result.output
+    assert result.output.startswith("Acquiring Test Book\nGathering metadata....\n")
+    archive = next((tmp_path / "output").glob("*.cbz"))
+    with ZipFile(archive) as cbz:
+        assert cbz.read("00001.jpg") == server.images["z.jpg"]
 
 
 def test_partial_receipts(tmp_path, monkeypatch):
@@ -369,3 +503,168 @@ def test_foreign_base(tmp_path, monkeypatch):
     with pytest.raises(ServiceResponseError):
         server.adapter(tmp_path, monkeypatch).get_publication("123")
     assert all(r.url.host != "example.com" for r in server.calls)
+
+
+class InlineServer(Server):
+    """Synthetic publisher-named XHTML components, each with a direct image."""
+
+    def __init__(self):
+        super().__init__()
+        self.component_images = {}
+        for number, (part, image) in enumerate(
+            zip(self.book["spine"], ("cover.jpg", "z.jpg", "a.jpg"), strict=True), start=1
+        ):
+            path = f"OEBPS/publisher_001_{number:03}_r1.xhtml"
+            part["path"] = path
+            self.component_images["/" + path] = image
+        self.book["nav"]["landmarks"][0]["path"] = self.book["spine"][0]["path"]
+        self.extra_markup = ""
+        self.foreign = False
+        self.base = None
+
+    def handle(self, request):
+        if request.url.path in self.component_images:
+            self.calls.append(request)
+            assert "Authorization" not in request.headers
+            assert "read=private-cookie" in request.headers["Cookie"]
+            assert request.url.params["secret"] in {"a", "b", "c"}
+            name = self.component_images[request.url.path]
+            source = f"images/{name}"
+            if self.foreign:
+                source = "https://example.com/private-image.jpg"
+            base = f'<base href="{self.base}">' if self.base else ""
+            return httpx.Response(
+                200,
+                text=(
+                    base
+                    + '<link rel="stylesheet" href="../styles/pages.css">'
+                    + f'<img src="{source}"/>'
+                    + self.extra_markup
+                ),
+            )
+        if request.url.path == "/styles/pages.css":
+            self.calls.append(request)
+            return httpx.Response(
+                200, text="img {width: 100%}", headers={"Content-Type": "text/css"}
+            )
+        return super().handle(request)
+
+
+def test_inline_originals(tmp_path, monkeypatch):
+    server = InlineServer()
+    result = server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert result.cover.path.read_bytes() == server.images["cover.jpg"]
+    assert [page.path.read_bytes() for page in result.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ]
+    image_requests = [r.url.path for r in server.calls if r.url.path.endswith(".jpg")]
+    assert image_requests == [
+        "/OEBPS/images/cover.jpg",
+        "/OEBPS/images/z.jpg",
+        "/OEBPS/images/a.jpg",
+    ]
+    assert result.reading_direction == "rtl"
+    assert [page.numbers for page in result.narrative] == [(1,), (2,)]
+    capture = json.loads(next(tmp_path.glob("libby-overdrive/123/captures/*.json")).read_text())
+    assert capture["complete"]
+    assert capture["assets"][0]["component"] == "OEBPS/publisher_001_001_r1.xhtml"
+    assert capture["assets"][0]["source_path"] == "/OEBPS/images/cover.jpg"
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<img src="images/z.jpg"/>',
+        '<img src="images/cover.jpg"/>',
+        '<svg><image href="images/z.jpg"/></svg>',
+    ],
+    ids=["second", "repeated", "svg"],
+)
+def test_inline_ambiguity(tmp_path, monkeypatch, markup):
+    server = InlineServer()
+    server.extra_markup = markup
+    with pytest.raises(ServiceResponseError, match="unambiguous"):
+        server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert not any(r.url.path.endswith(".jpg") for r in server.calls)
+
+
+def test_inline_foreign(tmp_path, monkeypatch):
+    server = InlineServer()
+    server.foreign = True
+    with pytest.raises(ServiceResponseError):
+        server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert all(r.url.host != "example.com" for r in server.calls)
+
+
+def test_inline_base(tmp_path, monkeypatch):
+    server = InlineServer()
+    server.base = "/publisher/"
+    server.adapter(tmp_path, monkeypatch).get_publication("123")
+    image_requests = [r.url.path for r in server.calls if r.url.path.endswith(".jpg")]
+    assert image_requests == [
+        "/publisher/images/cover.jpg",
+        "/publisher/images/z.jpg",
+        "/publisher/images/a.jpg",
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../outside.xhtml",
+        "OEBPS/../outside.xhtml",
+        "https://example.com/page.xhtml",
+        "OEBPS/page.xhtml?token=secret",
+    ],
+    ids=["parent", "traversal", "absolute", "query"],
+)
+def test_source_paths(tmp_path, monkeypatch, path):
+    server = InlineServer()
+    server.book["spine"][1]["-odread-original-path"] = path
+    with pytest.raises(ServiceResponseError, match="component path"):
+        server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert not any(r.url.path.endswith(".xhtml") for r in server.calls)
+
+
+def test_inline_encoded(tmp_path, monkeypatch):
+    import base64
+    import re
+
+    server = InlineServer()
+    handler = server.handle
+
+    def encoded(request):
+        response = handler(request)
+        if request.url.path in server.component_images:
+            head, body = response.text.split("<img", 1)
+            plain = base64.b64encode(("<img" + body).encode()).decode()
+            cipher = re.sub(r"(.)(.)(.)(.)", r"\4\2\3\1", plain)
+            return httpx.Response(
+                200, text=(head + "<script>parent.__bif_cfc1(self, '" + cipher + "')</script>")
+            )
+        return response
+
+    server.handle = encoded
+    result = server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert result.cover.path.read_bytes() == server.images["cover.jpg"]
+    assert [page.path.read_bytes() for page in result.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ]
+
+
+def test_mixed_mapping(tmp_path, monkeypatch):
+    server = Server()
+    handler = server.handle
+
+    def mixed(request):
+        response = handler(request)
+        if request.url.path.startswith("/html/"):
+            return httpx.Response(200, text=response.text + '<img src="../images/cover.jpg"/>')
+        return response
+
+    server.handle = mixed
+    with pytest.raises(ServiceResponseError, match="mixes"):
+        server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert not any(r.url.path.endswith(".jpg") for r in server.calls)

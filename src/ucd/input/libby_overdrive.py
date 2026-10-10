@@ -18,7 +18,8 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from contextlib import closing
+from datetime import UTC, date, datetime
 from functools import partial
 from html import unescape
 from pathlib import Path
@@ -40,6 +41,7 @@ from ucd.auth.libby import (
 from ucd.download.cache import cache_root
 from ucd.download.images import ImageCache, _atomic_write
 from ucd.download.pagination import _infer_page_numbers
+from ucd.download.parallel import fetch_ordered
 from ucd.exceptions import InvalidComicInputError, ServiceResponseError
 from ucd.input.base import InputAdapter, MetadataCallback, ProgressCallback
 from ucd.input.libby_assets import Asset, download_image, map_assets
@@ -268,12 +270,21 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         cache_dir: Path | None = None,
         refresh: bool = False,
         status: Callable[[str], None] | None = None,
+        mapping_progress: ProgressCallback | None = None,
+        workers: int = 1,
+        title_ready: Callable[[str], None] | None = None,
     ) -> None:
+        if workers < 1:
+            raise ValueError("Libby workers must be positive.")
         self.store = store or ConnectionStore(config_path(), system_secret_store())
 
         # API credentials and reader cookies stay in separate clients.
         self.api = api_client or httpx.Client(timeout=30, follow_redirects=False)
-        self.read = read_client or httpx.Client(timeout=30, follow_redirects=False)
+        self.read = read_client or httpx.Client(
+            timeout=30,
+            follow_redirects=False,
+            limits=httpx.Limits(max_connections=workers, max_keepalive_connections=workers),
+        )
         self._owned_api = api_client is None
         self._owned_read = read_client is None
 
@@ -281,6 +292,9 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         self.root = (cache_dir if cache_dir is not None else cache_root()) / self.name
         self.refresh = refresh
         self.status = status or (lambda message: None)
+        self.mapping_progress = mapping_progress
+        self.workers = workers
+        self.title_ready = title_ready
 
     def matches_url(self, url: str) -> bool:
         parts = urlsplit(url)
@@ -305,14 +319,20 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         # 1. Verify the active checkout and open its authorized reader.
         catalog, rendition = self._open_rendition(title_id, reader)
         metadata = bibliographic(title_id, catalog, rendition.openbook)
+        if self.title_ready:
+            self.title_ready(metadata["title"])
 
         # Let the caller skip an existing output before acquiring images.
         if metadata_ready:
             metadata_ready(metadata["title"], None, None)
 
         # 2. Resolve the complete spine before fetching any image bytes.
-        self.status("Mapping spine components to original images…")
-        assets = map_assets(reader, rendition)
+        # Mapping can spend one network round trip per component. Keep its
+        # measured progress separate from acquisition's image count.
+        mapping = (
+            partial(self.mapping_progress, metadata["title"]) if self.mapping_progress else None
+        )
+        assets = map_assets(reader, rendition, progress=mapping, workers=self.workers)
 
         # 3. Keep exact originals and a receipt for each successful fetch.
         pages, capture, records = self._acquire_images(
@@ -358,12 +378,17 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         self, title_id: str, reader: OverDriveReadClient
     ) -> tuple[dict[str, Any], ReadRendition]:
         """Verify the saved card, fetch catalog data, and open the reader."""
-        self.status("Checking saved library connections and active loans…")
+        self.status("Checking checkout…")
         client = LibbyClient(self.api, progress=self.status)
         connection, session, _ = self.store.select_loan(client, title_id, name=self.library_card)
 
-        self.status("Fetching current catalog metadata…")
+        self.status("Fetching metadata…")
         catalog = client.catalog_media(connection.library, session, title_id)
+        # Announce the catalog title before reader setup. If it is absent,
+        # get_publication() announces the validated reader title instead.
+        title = _text(catalog.get("title"))
+        if title and self.title_ready:
+            self.title_ready(title)
 
         # The loan opener can renew an existing identity once. Keep the
         # replacement in the credential store, separate from image records.
@@ -375,12 +400,12 @@ class LibbyOverDriveReadAdapter(InputAdapter):
                 Credentials(credentials.card_number, credentials.pin, updated),
             )
 
-        self.status("Opening OverDrive Read loan…")
+        self.status("Opening reader…")
         passport = client.open_loan(
             connection.library, session, title_id, session_renewed=save_renewed
         )
 
-        self.status("Establishing reader connection and decoding openbook…")
+        self.status("Decoding metadata…")
         rendition = reader.fetch_openbook(passport)
 
         return catalog, rendition
@@ -409,42 +434,55 @@ class LibbyOverDriveReadAdapter(InputAdapter):
             progress(title, 0, total)
 
         with TemporaryDirectory() as scratch:
-            for number, asset in enumerate(assets):
-                # No network-saving reuse until rendition/path stability is
-                # verified across sessions. SHA-256 still deduplicates
-                # objects.
-                key = json.dumps([self.name, title_id, capture, asset.path])
-                filename = Path(scratch) / str(number)
-                image = image_cache.acquire(
-                    key,
-                    partial(download_image, reader, asset, origin, filename),
-                    refresh=self.refresh,
-                )
+            # The authenticated reader handshake is complete before workers
+            # share its pooled HTTP client. Each fetch owns a unique temp path;
+            # cache writes, manifests, and progress remain on this thread.
+            def fetch_image(number: int, asset: Asset) -> tuple[DownloadedImageFile, str]:
+                image = download_image(reader, asset, origin, Path(scratch) / str(number))
+                return image, datetime.now(UTC).isoformat(timespec="microseconds")
 
-                # Cover and narrative roles come from the reader, not
-                # position.
-                page = Page(
-                    numbers=() if asset.role == "cover" else None,
-                    path=image.filename,
-                    width=image.width,
-                    height=image.height,
-                    content_type=image.content_type,
-                    mode=image.mode,
-                )
+            with closing(fetch_ordered(assets, fetch_image, self.workers)) as images:
+                for number, (downloaded, fetched_at) in images:
+                    asset = assets[number]
+                    # No network-saving reuse until rendition/path stability is
+                    # verified across sessions. SHA-256 still deduplicates
+                    # objects.
+                    key = json.dumps([self.name, title_id, capture, asset.path])
 
-                if asset.role == "cover":
-                    cover = page
-                elif asset.role == "narrative":
-                    narrative.append(page)
+                    def ready(image: DownloadedImageFile = downloaded) -> DownloadedImageFile:
+                        return image
 
-                records.append(self._asset_record(title_dir, key, asset, image))
+                    image = image_cache.acquire(
+                        key,
+                        ready,
+                        refresh=self.refresh,
+                        fetched_at=fetched_at,
+                    )
 
-                # Persist each verified association. A later failure leaves
-                # valid originals and their per-fetch receipts intact.
-                self._write_capture(title_id, title, capture, records, complete=False)
+                    # Cover and narrative roles come from the reader, not
+                    # position.
+                    page = Page(
+                        numbers=() if asset.role == "cover" else None,
+                        path=image.filename,
+                        width=image.width,
+                        height=image.height,
+                        content_type=image.content_type,
+                        mode=image.mode,
+                    )
 
-                if progress:
-                    progress(title, number + 1, total)
+                    if asset.role == "cover":
+                        cover = page
+                    elif asset.role == "narrative":
+                        narrative.append(page)
+
+                    records.append(self._asset_record(title_dir, key, asset, image))
+
+                    # Persist each verified association. A later failure leaves
+                    # valid originals and their per-fetch receipts intact.
+                    self._write_capture(title_id, title, capture, records, complete=False)
+
+                    if progress:
+                        progress(title, number + 1, total)
 
         if cover is None:
             raise ServiceResponseError("Acquisition did not produce the required full cover.")

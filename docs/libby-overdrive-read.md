@@ -127,7 +127,127 @@ last-modified information describe that representation. They must not be
 assumed to describe the full cover JPEG selected through the landmark, spine,
 and CSS. Inspect the extracted full cover independently.
 
+### Publisher-named XHTML with inline images
+
+A later live inspection of *Berserk, Volume 1* (title ID `3368897`) found
+227 fixed-layout spine components: one cover and 226 narrative components,
+with explicit RTL direction. The first two source documents used paths like
+`OEBPS/miur_9781630089993_epub3_001_r1.xhtml`. Their decoded bodies contained
+one ordinary `<img>` each, no element IDs, and no CSS background image rules.
+The cover reference was relative to the document's `images/` directory;
+the narrative image had an opaque filename unrelated to the XHTML name.
+
+The initial Mecha-Ude-specific path check rejected this rendition before
+fetching images. The corrected mapper accepts safe relative XHTML paths and
+uses each document's single direct image reference as its association. Cover
+and narrative roles still come from landmarks and spine linearity; source
+spine order remains authoritative. The existing CSS-background binding is
+retained for documents that use it.
+
+Multiple direct images, SVG image compositions, or simultaneous inline and
+background page images fail explicitly. They require a rendering/composition
+policy before UCD can represent the whole component as one unchanged image.
+The inline-image path has synthetic coverage, including encoded bodies and
+relative bases. A full live download was verified on 2026-10-09: the CBZ
+contained 227 JPEGs, and every image matched its cached original bytes,
+recorded SHA256, and byte count. ZIP integrity checks passed. ComicInfo
+reported 226 narrative pages, English, and `Manga=YesAndRightToLeft`.
+
+I checked the resulting archive in Simple Comic and confirmed that
+the images rendered correctly, page turning worked with RTL mode selected,
+and a two-page spread aligned correctly. RTL mode was selected manually;
+this check does not establish automatic detection of the ComicInfo flag.
+
 ## Exact bytes and verification
+
+Libby fetching optionally overlaps requests through `--workers N` (any
+positive integer, default 1). Device authentication and the reader handshake
+finish before any worker starts. Workers share the established HTTPX reader
+client, and each image has its own temporary filename. The bounded queue holds
+at most N pending results and consumes them in source order. Component
+documents can overlap; shared stylesheet resolution remains serial and fetches
+each sheet once. All components are mapped before image acquisition starts.
+
+Cache publication, capture updates, page assembly, and progress callbacks run
+on the consumer thread. Workers attach the image's fetch-completion timestamp
+so an acquisition receipt records that time rather than a later ordered cache
+write. Bars count validated results consumed in source order; a slow earlier
+request can briefly hold up visible progress even if later requests finished.
+On failure, queued work is cancelled and running requests finish before their
+session or temporary directory closes. A partial capture stays incomplete,
+and no partial CBZ is published. Tests exercise overlapping requests that
+finish out of order, bounded scheduling, and cancellation. Live speed and
+output comparisons were completed on 2026-10-09.
+
+### Live concurrency measurements
+
+The test machine was an Apple M1 Max MacBook Pro with 10 physical and 10
+logical CPU cores: 8 performance cores and 2 efficiency cores. It had 32 GiB
+of RAM (`34359738368` bytes) and ran macOS 26.7.1, build `25G241`. These values
+came from my `sysctl` and `sw_vers` output. Worker counts describe
+concurrent network fetches and are independent of CPU core count.
+
+Each run freshly fetched the same three titles in input order: Berserk
+(`3368897`, 227 images), Dorohedoro (`4247083`, 170 images), and Mecha-Ude
+(`11103570`, 193 images), for 590 images total. The command included
+`--refresh --overwrite`; authentication, mapping, acquisition, and CBZ writing
+are all included in the shell's elapsed time.
+
+| Workers | Elapsed (s) | User CPU (s) | System CPU (s) |
+| ---: | ---: | ---: | ---: |
+| 4 | 116.149 | 19.184 | 3.173 |
+| 8 | 57.566 | 15.287 | 2.561 |
+| 16 | 37.134 | 12.619 | 2.373 |
+| 32 | 24.087 | 12.154 | 3.288 |
+
+Reproduce a run from an environment with a verified saved Phoenix card and
+these active checkouts, changing the worker count for each comparison:
+
+```bash
+time ucd download --service libby-overdrive --library-card phoenix \
+  3368897 4247083 11103570 --workers 32 \
+  --output-dir ~/E-Books/Parallel-Test/ --refresh --overwrite
+```
+
+Capture the machine details with:
+
+```bash
+sysctl -n machdep.cpu.brand_string
+sysctl hw.physicalcpu hw.logicalcpu hw.memsize
+sysctl hw.perflevel0.name hw.perflevel0.physicalcpu \
+       hw.perflevel1.name hw.perflevel1.physicalcpu
+sw_vers
+```
+
+All four- through sixteen-worker output archives passed ZIP integrity checks;
+every image's bytes and archive member order matched the preceding sequential
+copies. After the 32-worker run, the available Berserk and Dorohedoro outputs
+also matched; Mecha-Ude was available under a sync-conflict filename and that
+copy matched as well. The original 32-worker Mecha-Ude filename was no longer
+present at verification time, so that copy's association with the timed run
+is not independently established.
+
+I saw a noticeable improvement during mapping. These are single
+live observations rather than controlled benchmarks with repeated trials;
+network conditions were not measured. There is no recorded sequential elapsed
+time, so no speedup relative to one worker can be calculated. Going from 16
+workers to 32 reduced the observed elapsed time by about 35%.
+
+An initial live Dorohedoro download (title ID `4247083`) mapped 170 images
+but failed when acquiring the cover. A header-only probe found an HTTPS 302
+redirect from the reader host to `odrresources.cachefly.net`, with a different
+path and no query. Image acquisition now accepts redirects to that exact
+HTTPS hostname on the default port or port 443. Each image must start on the
+authorized reader origin; documents and stylesheets retain the same-origin
+rule. Redirects remain bounded, and CDN requests carry neither Authorization
+nor Cookie headers. Synthetic tests verify original-byte preservation through
+this redirect and reject other hosts, HTTP, userinfo, and fragments. The next
+live batch completed Dorohedoro acquisition at 170/170 images and wrote its
+CBZ, then completed Mecha-Ude at 193/193 images and wrote its CBZ. The existing
+Berserk archive was skipped. I subsequently visually checked all three manga
+volumes: Berserk, Dorohedoro, and Mecha-Ude. All three rendered correctly.
+The earlier Berserk check also confirmed RTL page turning with RTL mode
+selected and correct two-page spread alignment in Simple Comic.
 
 Fetch mapped image resources through authorized fulfillment and retain the
 exact response-body bytes. The research did this inside the browser reader;
@@ -623,14 +743,17 @@ observed component-body transform swaps characters one and four in each
 four-character group and then decodes base64 and UTF-8; no JavaScript
 executes.
 
-The supported mapping is deliberately narrow: `html/cover.xhtml` and
-`html/pageNNN.xhtml` bind to corresponding page element IDs. Every component
-must contain its expected element and its stylesheets must supply one image
-URL. Plain ID selectors and a single background URL are accepted; conflicting
-mappings, conditional image rules, unsupported document paths, foreign
-origins, and invalid image bytes fail before publication. Stylesheets are
-fetched once per distinct URL during an acquisition. All associations are
-validated before image retrieval starts.
+Two fixed-layout image mappings are supported. The observed Mecha-Ude
+`html/cover.xhtml` and `html/pageNNN.xhtml` documents bind to corresponding
+page element IDs; their stylesheets supply one background image URL. Other
+publisher-named XHTML documents can supply a single direct `<img src>` without
+an element ID. Resolve that reference against the document URL or its
+validated same-origin `<base href>`. Never derive an image name or page
+identity from a publisher filename. Plain ID selectors and a single background
+URL are accepted; conflicting mappings, conditional image rules, unsafe
+document paths, foreign origins, and invalid image bytes fail before
+publication. Stylesheets are fetched once per distinct URL during an
+acquisition. All associations are validated before image retrieval starts.
 
 Images are inspected with Pillow and saved without re-encoding. JPEG/PNG MIME
 and decoded format must agree. Libby and Marvel share the existing measured

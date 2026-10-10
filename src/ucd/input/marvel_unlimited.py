@@ -3,9 +3,9 @@ import json
 import mimetypes
 import re
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import date
-from functools import partial
+from datetime import UTC, date, datetime
 from http.cookiejar import MozillaCookieJar
 from io import BytesIO
 from pathlib import Path
@@ -30,6 +30,7 @@ from ucd.download.pagination import (
 from ucd.download.pagination import (
     _presentation_span as _presentation_span,
 )
+from ucd.download.parallel import fetch_ordered
 from ucd.exceptions import (
     IneligibleError,
     InvalidComicInputError,
@@ -84,9 +85,13 @@ class MarvelUnlimitedAdapter(InputAdapter):
         *,
         cache_dir: Path | None = None,
         refresh: bool = False,
+        workers: int = 1,
     ) -> None:
+        if workers < 1:
+            raise ValueError("Marvel workers must be positive.")
         self.image_cache = ImageCache(cache_dir if cache_dir is not None else CACHE_PATH)
         self.refresh = refresh
+        self.workers = workers
 
         if client is not None:
             self.client = client
@@ -102,6 +107,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             cookies=cookies,
             headers={"User-Agent": USER_AGENT},
             follow_redirects=True,
+            limits=httpx.Limits(max_connections=workers, max_keepalive_connections=workers),
         )
 
     def _build_publication(
@@ -310,31 +316,54 @@ class MarvelUnlimitedAdapter(InputAdapter):
         # Scratch downloads are private to this call. Publication paths point
         # to the persistent cache and survive cleanup or another instance.
         with TemporaryDirectory(dir=WORK_PATH) as temporary:
-            for index, source in enumerate(sources):
+            # Check cached originals before downloading, so concurrency does
+            # not discard Marvel's network-saving reuse. Each request has its
+            # own scratch file; receipts and page assembly remain serial.
+            keys = []
+            for source in sources:
                 identity = (
                     ["asset", source.asset_id]
                     if source.asset_id is not None
                     else ["url-sha256", self._source_hash(source.url)]
                 )
-                key = json.dumps(["marvelUnlimited", digital_id, "source", identity])
-                filename = Path(temporary) / str(index)
-                image = self.image_cache.acquire(
-                    key,
-                    partial(self._download_image, source.url, filename),
-                    refresh=self.refresh,
-                )
-                page_list.append(
-                    Page(
-                        numbers=() if index == 0 else source.numbers,
-                        path=image.filename,
-                        width=image.width,
-                        height=image.height,
-                        content_type=image.content_type,
-                        mode=image.mode,
+                keys.append(json.dumps(["marvelUnlimited", digital_id, "source", identity]))
+            cached_images = [
+                self.image_cache.lookup(key) if not self.refresh else None for key in keys
+            ]
+
+            def fetch_image(
+                index: int, source: _MarvelPageSource
+            ) -> tuple[DownloadedImageFile, str | None]:
+                cached = cached_images[index]
+                if cached is not None:
+                    return cached, None
+                image = self._download_image(source.url, Path(temporary) / str(index))
+                return image, datetime.now(UTC).isoformat(timespec="microseconds")
+
+            with closing(fetch_ordered(sources, fetch_image, self.workers)) as images:
+                for index, (downloaded, fetched_at) in images:
+                    source = sources[index]
+                    image = downloaded
+                    if fetched_at is not None:
+
+                        def ready(image: DownloadedImageFile = downloaded) -> DownloadedImageFile:
+                            return image
+
+                        image = self.image_cache.acquire(
+                            keys[index], ready, refresh=self.refresh, fetched_at=fetched_at
+                        )
+                    page_list.append(
+                        Page(
+                            numbers=() if index == 0 else source.numbers,
+                            path=image.filename,
+                            width=image.width,
+                            height=image.height,
+                            content_type=image.content_type,
+                            mode=image.mode,
+                        )
                     )
-                )
-                if progress is not None:
-                    progress(index + 1, total)
+                    if progress is not None:
+                        progress(index + 1, total)
 
         pages = Pages(cover=page_list[0], pages=tuple(page_list[1:]))
         return _infer_page_numbers(pages) if infer_pagination else pages
