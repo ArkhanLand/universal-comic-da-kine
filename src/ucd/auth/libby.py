@@ -373,6 +373,39 @@ class LibbyClient:
             raise LibbyAuthenticationError("Renewed identity lost the selected library card.")
         return Session(identity, session.card_id, self.client_version)
 
+    def library_key(self, library: Library, session: Session) -> str:
+        """Resolve the canonical catalog key for the selected linked card."""
+        chip = _claims(session.identity).get("chip")
+        cards = chip.get("cards") if isinstance(chip, dict) else None
+        linked = [
+            card
+            for card in cards or []
+            if isinstance(card, list)
+            and len(card) >= 6
+            and str(card[1]) == session.card_id
+            and str(card[4]) == library.website_id
+        ]
+        if len(linked) != 1 or not isinstance(linked[0][5], str):
+            raise LibbyAuthenticationError(
+                "Saved identity lacks the selected card's library association; "
+                "rerun ucd init --service libby-overdrive."
+            )
+        library_key = linked[0][5]
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", library_key):
+            raise ServiceResponseError("Linked card has an invalid library key.")
+        return library_key
+
+    def catalog_media(self, library: Library, session: Session, title_id: str) -> dict[str, Any]:
+        key = self.library_key(library, session)
+        data = self._request(
+            "GET",
+            f"{THUNDER}/v2/libraries/{quote(key, safe='')}/media/{title_id}",
+            params={"x-client-id": "dewey"},
+        )
+        if str(data.get("id")) != title_id:
+            raise ServiceResponseError("Catalog title does not match the requested checkout.")
+        return data
+
     def open_loan(
         self,
         library: Library,
@@ -393,24 +426,7 @@ class LibbyClient:
         # Layout is checked after decoding openbook; a passport alone cannot prove it.
         # Setup lookup keys can differ from the linked card's canonical key.
         # The official browser uses the linked card's key in the open codex.
-        chip = _claims(session.identity).get("chip")
-        cards = chip.get("cards") if isinstance(chip, dict) else None
-        linked = [
-            card
-            for card in cards or []
-            if isinstance(card, list)
-            and len(card) >= 6
-            and str(card[1]) == session.card_id
-            and str(card[4]) == library.website_id
-        ]
-        if len(linked) != 1 or not isinstance(linked[0][5], str):
-            raise LibbyAuthenticationError(
-                "Saved identity lacks the selected card's library association; "
-                "rerun ucd init --service libby-overdrive."
-            )
-        library_key = linked[0][5]
-        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", library_key):
-            raise ServiceResponseError("Linked card has an invalid library key.")
+        library_key = self.library_key(library, session)
         slug = f"{session.card_id}-{title_id}"
         codex = {
             "codex": {

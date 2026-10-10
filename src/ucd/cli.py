@@ -2,10 +2,14 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import httpx
 import typer
 
+from ucd.auth.libby import CredentialStoreError, LibbyAuthenticationError
+from ucd.download.cache import cache_root
 from ucd.exceptions import ComicDownloaderError, InvalidComicInputError
 from ucd.input.cbz import CBZInputAdapter
+from ucd.input.libby_overdrive import LibbyOverDriveReadAdapter
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 from ucd.metadata import prepare_comic_metadata
 from ucd.output.cbz import (
@@ -263,16 +267,25 @@ def download(
         "--refresh",
         help="Fetch fresh image bytes even when locally cached; use --overwrite for existing CBZs.",
     ),
-    quit_on_error: bool = typer.Option(
-        False,
-        "--quit-on-error",
-        help="Stop after the first failed source.",
+    service: str | None = typer.Option(
+        None, "--service", help="Input service; bare IDs default to Marvel."
     ),
+    library_card: str | None = typer.Option(None, "--library-card"),
+    cache_dir: Path | None = typer.Option(None, "--cache-dir", envvar="UCD_CACHE_DIR"),
+    output_format: str = typer.Option("cbz", "--output-format"),
+    continue_on_error: bool = typer.Option(False, "--continue-on-error"),
+    quit_on_error: bool = typer.Option(False, "--quit-on-error", hidden=True),
 ) -> None:
-    """Download one or more Marvel Unlimited issues as CBZ files."""
+    """Download checked-out Libby titles or Marvel issues as CBZ files."""
+    if service not in {None, "marvel-unlimited", "libby-overdrive"}:
+        raise typer.BadParameter("Supported services: marvel-unlimited, libby-overdrive.")
+    if output_format != "cbz":
+        raise typer.BadParameter("Only CBZ output is currently supported.")
+    if continue_on_error and quit_on_error:
+        raise typer.BadParameter("Choose either --continue-on-error or --quit-on-error.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    adapter = MarvelUnlimitedAdapter(cookie_file=cookie_file, refresh=refresh)
+    adapters: dict[str, MarvelUnlimitedAdapter | LibbyOverDriveReadAdapter] = {}
     progress = _ProgressBar()
     failures = 0
 
@@ -293,34 +306,79 @@ def download(
         for source in sources:
             progress.reset()
             try:
-                publication = adapter.get_publication(
+                selected = service or (
+                    "libby-overdrive"
+                    if source.startswith("https://share.libbyapp.com/title/")
+                    else "marvel-unlimited"
+                )
+                if library_card and selected != "libby-overdrive":
+                    raise InvalidComicInputError("--library-card requires a Libby source.")
+                if selected not in adapters:
+                    if selected == "libby-overdrive":
+                        adapters[selected] = LibbyOverDriveReadAdapter(
+                            library_card=library_card,
+                            cache_dir=cache_dir,
+                            refresh=refresh,
+                            status=typer.echo,
+                        )
+                    else:
+                        adapters[selected] = MarvelUnlimitedAdapter(
+                            cookie_file=cookie_file,
+                            refresh=refresh,
+                            cache_dir=cache_dir / selected if cache_dir is not None else None,
+                        )
+                publication = adapters[selected].get_publication(
                     source,
                     progress=progress.update,
                     metadata_ready=check_destination,
                 )
                 publication = prepare_comic_metadata(publication)
-                destination = output_dir / make_cbz_filename(publication)
-                write_cbz(
-                    publication,
-                    destination,
-                    overwrite=overwrite,
+                filename = (
+                    make_cbz_filename_from_metadata(publication.title, None, None)
+                    if publication.service == "libby-overdrive" and publication.issue_number is None
+                    else make_cbz_filename(publication)
                 )
+                destination = output_dir / filename
+                # Publish only a complete archive, including failures during writing.
+                with TemporaryDirectory(dir=output_dir) as scratch:
+                    temporary = Path(scratch) / "output.cbz"
+                    write_cbz(publication, temporary)
+                    if overwrite:
+                        temporary.replace(destination)
+                    else:
+                        os.link(temporary, destination)
                 typer.echo(f"Wrote {destination}")
             except FileExistsError as exc:
-                failures += 1
-                typer.echo(f"Error: output file already exists: {exc}", err=True)
-                if quit_on_error:
-                    raise typer.Exit(code=1) from exc
-            except ComicDownloaderError as exc:
-                failures += 1
+                typer.echo(f"Skipped existing output: {exc}")
+            except (LibbyAuthenticationError, CredentialStoreError) as exc:
                 typer.echo(f"Error: {exc}", err=True)
-                if quit_on_error:
-                    raise typer.Exit(code=1) from exc
+                raise typer.Exit(code=1) from None
+            except (ComicDownloaderError, OSError, ValueError, httpx.HTTPError) as exc:
+                failures += 1
+                message = (
+                    "Service connection failed." if isinstance(exc, httpx.HTTPError) else str(exc)
+                )
+                typer.echo(f"Error: {message}", err=True)
+                if not continue_on_error:
+                    raise typer.Exit(code=1) from None
 
         if failures:
             raise typer.Exit(code=1)
     finally:
-        adapter.cleanup()
+        for adapter in adapters.values():
+            adapter.cleanup()
+
+
+cache_app = typer.Typer(help="Locate the original image cache.")
+app.add_typer(cache_app, name="cache")
+
+
+@cache_app.command("where")
+def cache_where(
+    cache_dir: Path | None = typer.Option(None, "--cache-dir", envvar="UCD_CACHE_DIR"),
+) -> None:
+    """Print the shared cache root without opening credentials or fetching data."""
+    typer.echo(str(cache_dir if cache_dir is not None else cache_root()))
 
 
 @app.command()

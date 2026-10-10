@@ -215,7 +215,7 @@ def test_matching_height(monkeypatch, size, reference, expected):
         calls.append(dimensions)
         return _inferred_span(dimensions, reference)
 
-    monkeypatch.setattr("ucd.input.marvel_unlimited._inferred_span", measure)
+    monkeypatch.setattr("ucd.download.pagination._inferred_span", measure)
     assert _presentation_span(size, reference) == expected
     assert calls == [size]
 

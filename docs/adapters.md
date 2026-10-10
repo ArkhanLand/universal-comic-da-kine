@@ -32,7 +32,7 @@ cleanup is needed. The legacy
 `matches_url` hook recognizes local `.cbz` paths for this adapter. See
 [CBZ input](cbz-input.md) for metadata precedence and supported projections.
 
-The CLI explicitly routes `download` to Marvel and `convert` to CBZ input;
+The CLI routes `download` to Marvel or Libby and `convert` to CBZ input;
 implementing a subclass alone does not register it or route new sources.
 
 `src/ucd/output/cbz.py` supplies `write_cbz(publication, destination,
@@ -69,10 +69,9 @@ repository objects exist.
 
 ## Initial Libby connection support
 
-This section describes the unmerged prototype in the
-`feat/libby-authentication` working checkout as of 2026-10-09. These commands
-are not yet available from the main checkout or a released UCD installation.
-The live validation status of each path is noted below.
+Authentication, loan listing, and inspection were merged in PR #41. The
+`feat/libby-download` branch adds fixed-layout image acquisition and CBZ
+routing; a live download of title `11103570` also passed on 2026-10-09.
 
 `ucd init --service libby-overdrive` now provides the initial setup path:
 resolve the library key, prompt privately for a card number and PIN, verify
@@ -102,21 +101,20 @@ Device cloning, blessing transfers, and the experimental
 `UCD_LIBBY_AUTH_MODE` setup switch were removed; they are not part of the
 current card-number/PIN setup path.
 
-The working-branch prototype includes
-`ucd list-loans --service libby-overdrive`, intended to list active checkouts
-in saved-card preference order with title IDs, readable card names, and delivery
-formats. Command registration/help and synthetic tests have been checked. A live check
-on 2026-10-09 listed three active checkouts on the selected Phoenix connection;
-this command is not yet merged.
-It omits expired loans and credentials. `--library-card <name>` restricts the
-lookup to one saved connection. Authentication failures stop the whole command.
+The CLI includes `ucd list-loans --service libby-overdrive`, intended to list
+active checkouts in saved-card preference order with title IDs, readable card
+names, and delivery formats. Command registration/help and synthetic tests
+have been checked. A live check on 2026-10-09 listed three active checkouts on
+the selected Phoenix connection; this command was merged in PR #41. It omits
+expired loans and credentials. `--library-card <name>` restricts the lookup to
+one saved connection. Authentication failures stop the whole command.
 
-`UCD_DEV_COMMANDS=1 ucd inspect-loan --service libby-overdrive <title-id>`
-is a development/testing diagnostic, registered only when `UCD_DEV_COMMANDS`
-is exactly `1` at process startup. Otherwise it is absent from both help and
-command dispatch. Normal downloads will perform these checks internally;
-users do not need a separate inspection step. In the prototype, `list-loans` is registered
-without the development flag.
+`UCD_DEV_COMMANDS=1 ucd inspect-loan --service libby-overdrive <title-id>` is
+a development/testing diagnostic, registered only when `UCD_DEV_COMMANDS` is
+exactly `1` at process startup. Otherwise it is absent from both help and
+command dispatch. Normal downloads will perform these checks internally; users
+do not need a separate inspection step. `list-loans` is registered without the
+development flag.
 
 The inspection command exercises saved-card lookup and passport acquisition,
 establishes a separate read-host cookie jar, and decodes the embedded openbook
@@ -148,11 +146,32 @@ credential storage, and reader inspection without reusing the repaired session. 
 synthetic authentication and reader tests; they do not prove complete Libby
 download support.
 
-CSS image mapping, exact-byte image acquisition, catalog metadata integration,
-cache reuse, normalization, and download routing still need implementation or
-verification. The `download` command continues to use Marvel. Marvel setup is
-also not implemented. See [the Libby retrieval design](libby-overdrive-read.md)
-for the agreed target and the exact protocol reproduction steps.
+`LibbyOverDriveReadAdapter` verifies current checkouts, fetches catalog and
+reader metadata, maps the supported page elements through their stylesheets,
+and returns a complete Publication with original image bytes. API and reader
+clients have separate cookie jars. Every resource and redirect stays on the
+validated HTTPS reader origin. Component bases are honored only on that
+origin.
+
+The restricted CSS parser accepts plain ID selectors and single background
+URLs. Ambiguous mappings and conditional page-image rules fail explicitly; it
+does not implement a browser cascade. The component body decoder accepts the
+observed `__bif_cfc1` string transformation without executing JavaScript.
+
+Libby and Marvel share the existing measured pagination heuristic. Explicit
+reading direction and first-page position come from reader metadata; unknown
+positions remain unknown. Catalog series positions do not become issue or
+volume numbers. Catalog/BIF source projections and versioned acquisition
+manifests are kept separately from normalized Publication fields. Reader
+secrets and signed URLs are excluded. Per-fetch receipts retain UTC
+timestamps.
+
+The shared platform cache is discoverable with `ucd cache where`. Libby does
+not yet save network requests through identifier-based reuse: originals are
+fetched again and deduplicated by their verified SHA-256 bytes until stability
+is demonstrated. Marvel retains its verified lookup reuse policy. Marvel setup
+is not implemented. See [the retrieval design](libby-overdrive-read.md) for
+protocol details and the remaining live-validation work.
 
 ## Target contract
 
