@@ -2,17 +2,14 @@
 
 ## Status and scope
 
-This document records observed retrieval behavior and the proposed acquisition
-boundary and agreed CLI workflow for Libby titles delivered through OverDrive
-Read. Browser-free saved-session renewal, loan opening, reader access, and
-openbook inspection passed live checks, including fresh card/PIN setup,
-on 2026-10-09 in the unmerged
-`feat/libby-authentication` working checkout. These commands are not yet part
-of main or a released installation. The reproducible protocol
-is recorded below and summarized in
-[the adapter guide](adapters.md#initial-libby-connection-support). Full download
-routing and a stable acquisition manifest schema remain unimplemented. The existing
-[core design](design.md) and [adapter contract](adapters.md) apply.
+This document records observed retrieval behavior, the acquisition boundary,
+and the agreed CLI workflow for Libby titles delivered through OverDrive Read.
+Browser-free setup, renewal, loan opening, and inspection passed live checks
+on 2026-10-09 and were merged in PR #41. The `feat/libby-download` branch adds
+CSS mapping, image acquisition, catalog normalization, acquisition records,
+and CBZ routing. These additions passed offline tests and a live CBZ download
+on 2026-10-09. The existing [core design](design.md) and [adapter
+contract](adapters.md) apply.
 
 The investigated rendition was *Mecha-Ude: Mechanical Arms, Volume 1*,
 OverDrive title ID `11103570`. Its capture contained one cover and 192 narrative
@@ -134,11 +131,11 @@ and CSS. Inspect the extracted full cover independently.
 
 Fetch mapped image resources through authorized fulfillment and retain the
 exact response-body bytes. The research did this inside the browser reader;
-the intended adapter will do it directly. Compute SHA-256 over acquired bytes
-before publishing them to the cache or a capture envelope.
-No canvas export, screenshot, resizing, JPEG re-encoding, or metadata rewrite
-belongs in this acquisition path. Image decoding for inspection must not
-replace the stored bytes.
+the adapter fetches them directly. Compute SHA-256 over acquired bytes before
+publishing them to the cache or a capture envelope. No canvas export,
+screenshot, resizing, JPEG re-encoding, or metadata rewrite belongs in this
+acquisition path. Image decoding for inspection must not replace the stored
+bytes.
 
 Record each asset's component association, spine index, role, sanitized source
 asset path/name, local capture member, content type, byte count, and SHA-256.
@@ -164,7 +161,7 @@ ucd init --service libby-overdrive
 ucd download --service libby-overdrive 11103570
 ```
 
-`LibbyOverDriveReadAdapter` will use saved authentication to verify the active
+`LibbyOverDriveReadAdapter` uses saved authentication to verify the active
 loan, obtain authorized OverDrive Read fulfillment, retrieve openbook/BIF and
 CSS resources, resolve the spine-to-image associations, and fetch source
 assets. Acquisition then verifies/caches exact objects, inspects image
@@ -493,8 +490,8 @@ Decode as follows, matching `decode_openbook()`:
 The decoded object can contain fulfillment secrets alongside safe metadata.
 Apply the allowlist below before retaining anything; successful decoding does
 not make wholesale serialization safe. No decryption or re-encoding of image
-JPEGs was needed in the earlier browser capture. CSS-to-image mapping and exact
-image fetching remain separate from decoding this metadata envelope.
+JPEGs was needed in the earlier browser capture. CSS-to-image mapping and
+exact image fetching are separate from decoding this metadata envelope.
 
 ### Reproduction and validation
 
@@ -505,11 +502,11 @@ ucd init --service libby-overdrive --library-card phoenix
 UCD_DEV_COMMANDS=1 ucd inspect-loan --service libby-overdrive 11103570
 ```
 
-The working branch also contains a `list-loans` prototype with synthetic tests
-and verified command registration. A live check on 2026-10-09 listed three
-active checkouts on the selected Phoenix connection, including title IDs,
-titles, and delivery formats, without borrowing or downloading. It is still
-unmerged. Listing is optional when reproducing inspection:
+The merged CLI contains `list-loans` with synthetic tests and verified command
+registration. A live check on 2026-10-09 listed three active checkouts on the
+selected Phoenix connection, including title IDs, titles, and delivery
+formats, without borrowing or downloading. Listing is optional when
+reproducing inspection:
 
 ```bash
 ucd list-loans --service libby-overdrive --library-card phoenix
@@ -616,17 +613,64 @@ refresh if the service supplies no trustworthy hash or revision marker.
 Locally calculated SHA-256 alone cannot establish the freshness of an asset
 that has not been fetched.
 
-## Remaining research before implementation
+## Download implementation and remaining verification
 
-The browser-free saved-session path through decoded rendition inspection is
-verified, including a fresh setup and subsequent inspection. Implement and
-validate CSS-to-image mapping, exact-byte fetching, catalog
-metadata acquisition, normalization, and download/output routing. Establish
-reliable rendition and image lookup identifiers across sessions before enabling
-network-saving reuse. Define the versioned internal acquisition manifest and
-extend deterministic synthetic fixtures; keep the full manga fixture and all
-secrets out of Git. These are remaining research and implementation-contract
-tasks, not reasons to require a manual capture bundle in the agreed CLI workflow.
+The download branch supports `ucd download --service libby-overdrive TITLE_ID`
+and canonical title share URLs. It requests current loan, Thunder, and reader
+metadata, then fetches each signed component document with the reader cookie
+jar. A same-origin document base establishes stylesheet resolution. The
+observed component-body transform swaps characters one and four in each
+four-character group and then decodes base64 and UTF-8; no JavaScript
+executes.
+
+The supported mapping is deliberately narrow: `html/cover.xhtml` and
+`html/pageNNN.xhtml` bind to corresponding page element IDs. Every component
+must contain its expected element and its stylesheets must supply one image
+URL. Plain ID selectors and a single background URL are accepted; conflicting
+mappings, conditional image rules, unsupported document paths, foreign
+origins, and invalid image bytes fail before publication. Stylesheets are
+fetched once per distinct URL during an acquisition. All associations are
+validated before image retrieval starts.
+
+Images are inspected with Pillow and saved without re-encoding. JPEG/PNG MIME
+and decoded format must agree. Libby and Marvel share the existing measured
+pagination policy. The complete normalized publication goes through existing
+metadata preparation and CBZ output. A temporary archive is published only
+when writing succeeds. Missing explicit issue numbering uses the full Libby
+title for the output filename, retaining series metadata without making a
+series position into a volume number.
+
+The platform cache root is displayed by `ucd cache where`, overridden by
+`--cache-dir` or `UCD_CACHE_DIR`. Libby title directories use stable numeric
+IDs; capture manifests contain the readable title. ImageCache objects retain
+exact byte hashes and per-fetch UTC receipts. Version-one capture manifests
+associate component, spine index, role, safe image path, object path, receipt,
+byte count, dimensions, media type, and mode. Each verified image updates an
+incomplete manifest. Only a complete acquisition publishes `complete=true` and
+the allowlisted catalog/reader source projection. Failed acquisition keeps
+verified originals and their receipts; it never writes a partial destination
+CBZ. This is an internal schema, not an original publisher container or the
+future general historical repository.
+
+Network-saving Libby reuse remains disabled until rendition/asset identifiers
+are checked across sessions. Every fetch currently receives a distinct lookup
+key; identical verified bytes still share the same SHA-256 object. No delivery
+URL, card context, cookie, or bearer value is persisted. This conservative
+choice does not yet provide network-saving resume after a partial download.
+
+Live checks confirmed the first two components share a stylesheet with 193
+background image rules (cover plus 192 pages), and use encoded component
+bodies with array-indexed authorization parameters. Live parser checks of the
+first two components found their expected elements and all 193 image mappings
+unambiguously. A full live download of title `11103570` then completed. Local
+verification found one full cover and 192 narrative JPEG entries, a valid ZIP
+CRC check, and exact agreement between every archived image, its cached
+original, and the acquisition SHA-256/byte-count record. ComicInfo reported
+PageCount 192, RTL manga, language `en`, publisher `Scholastic Inc.`, and
+imprint `Graphix`; the ZIP comment contained generated metadata. This
+establishes successful acquisition/output for that rendition, not support for
+every Libby title. The full manga and private source payloads must stay out of
+deterministic fixtures and Git.
 
 ## Sanitized acquisition and capture metadata
 

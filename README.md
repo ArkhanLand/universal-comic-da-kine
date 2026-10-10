@@ -10,12 +10,12 @@ formats without forgetting provenance. UCD complements library organizers such
 as Calibre by focusing on normalization, preservation, and conversion. It does
 not aim to replace your collection catalog or reading application.
 
-**Pre-1.0, early development.** Marvel Unlimited and local CBZ inputs export
-to CBZ with ComicInfo XML and ComicBookInfo ZIP-comment metadata. Marvel image
-bytes and per-fetch records are cached; CBZ input retains source archives and
-image bytes by hash.
-The general historical repository, transformation framework, and additional
-input/output adapters described below are planned, not available features.
+**Pre-1.0, early development.** Marvel Unlimited, fixed-layout Libby OverDrive
+Read, and local CBZ inputs export to CBZ with ComicInfo XML and ComicBookInfo
+ZIP-comment metadata. Original image bytes and per-fetch records are cached;
+CBZ input retains source archives and image bytes by hash. The general
+historical repository, transformation framework, and additional input/output
+adapters described below are planned, not available features.
 
 ## What counts as a publication?
 
@@ -66,12 +66,51 @@ in the output. Inputs remain untouched. Normalized metadata edits are refused
 until an explicit reconciliation policy is available. See
 [CBZ input](docs/cbz-input.md) for acceptance, ordering, and metadata limits.
 
+### Libby downloads
+
+Set up your saved library card, list its existing checkouts, then download a
+supported fixed-layout OverDrive Read title:
+
+```bash
+ucd init --service libby-overdrive
+ucd list-loans --service libby-overdrive
+ucd download --service libby-overdrive TITLE_ID --output-dir ./comics
+```
+
+`--library-card NAME` selects one saved card. UCD never borrows
+automatically.
+Other Libby formats and unsupported page mappings fail explicitly. Images
+retain their exact source bytes; cover and reading order come from the reader
+spine and landmarks. RTL does not reverse that order. Libby filenames use the
+full title when no explicit issue number is known, preventing different
+volumes of the same series from sharing a filename.
+
+Downloads stop on the first failure. `--continue-on-error` processes
+subsequent titles and returns a failing exit status if any title failed.
+Authentication failures always stop. Existing output files are successful
+skips unless `--overwrite` is supplied. CBZs are published only after writing
+completes. `--output-format cbz` is the only supported output format.
+
+`ucd cache where` displays the shared cache root. Use `--cache-dir PATH` or
+`UCD_CACHE_DIR` to override it. Defaults are `~/Library/Caches/ucd` on macOS,
+`%LOCALAPPDATA%/ucd` on Windows, and `${XDG_CACHE_HOME:-~/.cache}/ucd` on
+Linux. Title IDs establish Libby cache identity; readable titles are recorded
+in capture manifests. Credentials remain in the system credential store.
+
+Libby presently fetches images on each acquisition until rendition/path
+stability across sessions is verified. SHA-256 still deduplicates identical
+bytes. Each fetch has its own timestamped receipt, and capture manifests
+record associations and completeness. A failed acquisition retains verified
+objects and receipts. `--refresh` never permits replacing an existing CBZ; use
+`--overwrite` for that. The old `~/.local/share/ucd/marvel` cache is left
+untouched; it is not migrated automatically to the shared root.
+
 ### Reusing Marvel downloads
 
-Marvel images are retained under `~/.local/share/ucd/marvel` and reused by
-digital issue ID, page ID, and source rendition, even when delivery URLs
-change. Metadata and the page manifest are fetched on each import. Cached
-bytes are checked against their SHA-256 hash before reuse.
+Marvel images are retained under the shared cache root, in `marvel-unlimited`,
+and reused by digital issue ID, page ID, and source rendition, even when
+delivery URLs change. Metadata and the page manifest are fetched on each
+import. Cached bytes are checked against their SHA-256 hash before reuse.
 
 Use `ucd download SOURCE --refresh` to fetch fresh images. Add `--overwrite`
 if the destination CBZ already exists; `--overwrite` alone still reuses cached

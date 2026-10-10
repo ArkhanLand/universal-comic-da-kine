@@ -1,7 +1,9 @@
 # Third-party notices
 
 The Libby authentication and loan-opening protocol in `src/ucd/auth/libby.py`
-and openbook decoding in `src/ucd/input/libby_overdrive_read.py` were adapted from libby-archiver 0.4.0:
+openbook decoding in `src/ucd/input/libby_overdrive_read.py`, and component
+body decoding in `src/ucd/input/libby_assets.py` were adapted from
+libby-archiver 0.4.0:
 https://github.com/JavaGT/libby-archiver
 
 MIT License

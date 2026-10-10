@@ -192,7 +192,7 @@ def test_refresh_overwrite(tmp_path, monkeypatch):
     publication = make_test_publication(tmp_path)
 
     class Adapter:
-        def __init__(self, *, cookie_file, refresh):
+        def __init__(self, *, cookie_file, refresh, cache_dir):
             observed.append(refresh)
 
         def get_publication(self, source, progress, metadata_ready):
@@ -206,7 +206,7 @@ def test_refresh_overwrite(tmp_path, monkeypatch):
     runner = CliRunner()
     args = ["download", "1", "--output-dir", str(tmp_path / "output")]
     assert runner.invoke(app, args).exit_code == 0
-    assert runner.invoke(app, args + ["--refresh"]).exit_code == 1
+    assert runner.invoke(app, args + ["--refresh"]).exit_code == 0
     assert runner.invoke(app, args + ["--refresh", "--overwrite"]).exit_code == 0
     assert observed == [False, True, True]
 

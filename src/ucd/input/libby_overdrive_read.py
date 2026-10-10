@@ -223,7 +223,7 @@ class OverDriveReadClient:
             headers={
                 "User-Agent": USER_AGENT,
                 "Origin": "https://libbyapp.com",
-                "Accept": "text/html",
+                "Accept": "*/*",
             },
         )
         request.headers.pop("Authorization", None)
@@ -240,6 +240,25 @@ class OverDriveReadClient:
         if response.is_error:
             raise ServiceResponseError(f"Read-host request failed (HTTP {response.status_code}).")
         return response
+
+    @staticmethod
+    def validate_resource(url: str, origin: str) -> None:
+        _read_url(url, origin=origin)
+
+    def resource(self, url: str, origin: str) -> httpx.Response:
+        """Fetch a reader resource with bounded same-origin redirects."""
+        for _ in range(8):
+            response = self._get(url, origin)
+            if response.is_redirect:
+                location = response.headers.get("Location")
+                if not location:
+                    raise ServiceResponseError("Reader redirect has no target.")
+                url = urljoin(url, location)
+            elif response.status_code == 200:
+                return response
+            else:
+                raise ServiceResponseError("Reader resource was not available.")
+        raise ServiceResponseError("Too many redirects during reader acquisition.")
 
     def fetch_openbook(self, passport: dict[str, Any]) -> ReadRendition:
         urls = passport.get("urls")

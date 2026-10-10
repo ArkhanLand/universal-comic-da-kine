@@ -44,8 +44,8 @@ def test_catalog_404():
             adapter.get_issue_data("72984")
 
 
-@pytest.mark.parametrize("quit_on_error", [False, True])
-def test_cli_batch(tmp_path, monkeypatch, quit_on_error):
+@pytest.mark.parametrize("continue_on_error", [False, True], ids=["stop", "continue"])
+def test_cli_batch(tmp_path, monkeypatch, continue_on_error):
     calls = []
     cleaned = []
     publication = make_test_publication(tmp_path)
@@ -67,13 +67,13 @@ def test_cli_batch(tmp_path, monkeypatch, quit_on_error):
     monkeypatch.setattr("ucd.cli.MarvelUnlimitedAdapter", Adapter)
     output = tmp_path / "output"
     args = ["download", "1", "2", "--output-dir", str(output)]
-    if quit_on_error:
-        args.append("--quit-on-error")
+    if continue_on_error:
+        args.append("--continue-on-error")
     result = CliRunner().invoke(app, args)
     assert result.exit_code == 1
     assert isinstance(result.exception, SystemExit)
     assert "Error: No downloadable digital edition" in result.output
     assert "Traceback" not in result.output
-    assert calls == (["1"] if quit_on_error else ["1", "2"])
-    assert bool(list(output.glob("*.cbz"))) is not quit_on_error
+    assert calls == (["1", "2"] if continue_on_error else ["1"])
+    assert bool(list(output.glob("*.cbz"))) is continue_on_error
     assert cleaned == [True]

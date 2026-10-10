@@ -1,3 +1,5 @@
+import os
+import sys
 from pathlib import Path
 
 
@@ -26,3 +28,14 @@ class Cache:
         marker = self.complete_marker(service, service_id)
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.touch()
+
+
+def cache_root() -> Path:
+    """One discoverable platform cache root, optionally overridden by UCD_CACHE_DIR."""
+    if os.environ.get("UCD_CACHE_DIR"):
+        return Path(os.environ["UCD_CACHE_DIR"]).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ucd"
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "ucd"
+    return Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "ucd"
