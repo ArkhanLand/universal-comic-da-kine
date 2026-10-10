@@ -41,6 +41,11 @@ class ImageCache:
     def __init__(self, root: Path) -> None:
         self.root = root
 
+    def lookup(self, key: str) -> DownloadedImageFile | None:
+        """Verify a reusable original without changing any cache state."""
+        pointer = self.root / "assets" / hashlib.sha256(key.encode()).hexdigest()
+        return self._lookup(pointer, key)
+
     def _lookup(self, pointer: Path, key: str) -> DownloadedImageFile | None:
         try:
             record_id = pointer.read_text().strip()
@@ -77,6 +82,7 @@ class ImageCache:
         download: Callable[[], DownloadedImageFile],
         *,
         refresh: bool = False,
+        fetched_at: str | None = None,
     ) -> DownloadedImageFile:
         pointer = self.root / "assets" / hashlib.sha256(key.encode()).hexdigest()
         if not refresh:
@@ -86,7 +92,9 @@ class ImageCache:
 
         downloaded = download()
         # The callback returns only after a successful complete download.
-        fetched_at = datetime.now(UTC).isoformat(timespec="microseconds")
+        # Prefetched images supply their actual completion time, rather than
+        # the later time when ordered consumption reaches this cache write.
+        fetched_at = fetched_at or datetime.now(UTC).isoformat(timespec="microseconds")
         data = downloaded.filename.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
         extension = downloaded.filename.suffix

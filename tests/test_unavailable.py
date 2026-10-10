@@ -10,6 +10,33 @@ from ucd.metadata import prepare_comic_metadata
 
 
 @pytest.mark.parametrize(
+    "status", [401, 403, 404, 500, None], ids=["401", "403", "404", "500", "connect"]
+)
+def test_cli_connection(tmp_path, monkeypatch, status):
+    class Adapter:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_publication(self, *args, **kwargs):
+            request = httpx.Request("GET", "https://example.com/?private-token=secret")
+            if status is None:
+                raise httpx.ConnectError("private-token=secret", request=request)
+            httpx.Response(status, request=request).raise_for_status()
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr("ucd.cli.MarvelUnlimitedAdapter", Adapter)
+    result = CliRunner().invoke(app, ["download", "1", "--output-dir", str(tmp_path)])
+    assert result.exit_code == 1
+    expected = f"HTTP {status}" if status else "ConnectError"
+    assert expected in result.output
+    assert ("Refresh Marvel cookies" in result.output) is (status in (401, 403))
+    assert "private-token" not in result.output
+    assert "example.com" not in result.output
+
+
+@pytest.mark.parametrize(
     ("method", "endpoint"),
     [("get_metadata", "metadata"), ("get_page_sources", "assets")],
     ids=["metadata", "assets"],

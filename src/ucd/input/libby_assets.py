@@ -5,14 +5,18 @@ map_assets() fetches each component, decodes its HTML body, and connects the
 expected page element to its stylesheet's background image. It validates the
 complete mapping before download_image() is allowed to acquire an original.
 
-The parser supports the observed cover/page document convention and plain
-CSS ID selectors. It does not render pages or implement a browser cascade;
+The parser supports a single inline XHTML image or the observed page-element
+background convention with plain CSS ID selectors. It does not render pages
+or implement a browser cascade;
 ambiguous mappings fail rather than producing a guessed publication. Reader
-URLs and component authorization remain ephemeral and on the reader origin.
+URLs and component authorization remain ephemeral. Image redirects may use
+the explicitly allowed asset CDN; documents stay on the reader origin.
 """
 
 import base64
 import re
+from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from io import BytesIO
@@ -23,25 +27,38 @@ from urllib.parse import urljoin, urlsplit
 import tinycss2  # type: ignore[import-untyped]
 from PIL import Image, UnidentifiedImageError
 
+from ucd.download.parallel import fetch_ordered
 from ucd.exceptions import ServiceResponseError
 from ucd.input.libby_overdrive_read import OverDriveReadClient, ReadRendition, _js_string
 from ucd.models import DownloadedImageFile
 
 
 class ComponentHTML(HTMLParser):
-    """Keep just element IDs and stylesheet/base references from page markup."""
+    """Keep image references, element IDs, and stylesheet/base locations."""
 
     def __init__(self) -> None:
         super().__init__()
         self.stylesheets: list[str] = []
         self.ids: set[str] = set()
         self.base: str | None = None
+        # Some publishers put the page image directly in XHTML instead of CSS.
+        # Keep these references transient, like stylesheet and base URLs.
+        self.images: list[str] = []
+        self.svg_images: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         fields = dict(attrs)
         identifier = fields.get("id")
         if identifier:
             self.ids.add(identifier)
+
+        source = fields.get("src")
+        if tag == "img" and source:
+            self.images.append(source)
+
+        svg_source = fields.get("href") or fields.get("xlink:href")
+        if tag == "image" and svg_source:
+            self.svg_images.append(svg_source)
 
         href = fields.get("href")
         if tag == "link" and "stylesheet" in (fields.get("rel") or "").split() and href:
@@ -162,20 +179,29 @@ class Asset:
 
 
 def _component_keys(spine: list[dict[str, Any]]) -> set[str]:
-    """Validate the supported source paths before fetching components."""
+    """Validate source document identities before fetching components.
+
+    Publishers choose their own XHTML filenames. A filename is provenance,
+    not proof that the document contains an element with the same name.
+    Filename stems are only used by the supported CSS-background convention.
+    """
     keys: set[str] = set()
+    paths: set[str] = set()
 
     for part in spine:
         original = part.get("-odread-original-path", part.get("path"))
-        if not isinstance(original, str) or not re.fullmatch(
-            r"html/(cover|page\d+)\.xhtml", original
+        if (
+            not isinstance(original, str)
+            or not re.fullmatch(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.xhtml", original)
+            or any(segment in {".", ".."} for segment in original.split("/"))
         ):
             raise ServiceResponseError("Unsupported fixed-layout component path.")
-        key = Path(original).stem
 
-        if key in keys:
+        if original in paths:
             raise ServiceResponseError("Duplicate fixed-layout component identity.")
-        keys.add(key)
+
+        paths.add(original)
+        keys.add(Path(original).stem)
 
     return keys
 
@@ -186,9 +212,8 @@ def _load_component(
     origin: str,
     part: dict[str, Any],
     index: int,
-    key: str,
 ) -> tuple[ComponentHTML, str]:
-    """Fetch and decode one authorized page document, checking its element."""
+    """Fetch and decode one authorized page document before mapping its image."""
     params = rendition.openbook.get("-odread-cmpt-params", [])
     url = urljoin(rendition.web_url, part["path"])
 
@@ -208,13 +233,15 @@ def _load_component(
 
     response = reader.resource(url, origin)
     document = component_html(response.text)
-    if key not in document.ids:
-        raise ServiceResponseError("Component markup lacks its expected page element.")
-
     return document, url
 
 
-def map_assets(reader: OverDriveReadClient, rendition: ReadRendition) -> list[Asset]:
+def map_assets(
+    reader: OverDriveReadClient,
+    rendition: ReadRendition,
+    progress: Callable[[int, int], None] | None = None,
+    workers: int = 1,
+) -> list[Asset]:
     """Map the entire ordered spine; fetch no image bytes during this phase."""
     rendition.summary()
 
@@ -231,45 +258,72 @@ def map_assets(reader: OverDriveReadClient, rendition: ReadRendition) -> list[As
     keys = _component_keys(spine)
 
     assets = []
+    if progress:
+        progress(0, len(spine))
 
-    for index, part in enumerate(spine):
-        original = part.get("-odread-original-path", part["path"])
-        key = Path(original).stem
+    # Only independent component requests run in workers. Shared stylesheets
+    # are resolved once by the consumer, avoiding races in the CSS cache.
+    def fetch_component(index: int, part: dict[str, Any]) -> tuple[ComponentHTML, str]:
+        return _load_component(reader, rendition, origin, part, index)
 
-        # Fetch the page markup and verify its expected element first.
-        document, url = _load_component(reader, rendition, origin, part, index, key)
+    with closing(fetch_ordered(spine, fetch_component, workers)) as components:
+        for index, (document, url) in components:
+            part = spine[index]
+            original = part.get("-odread-original-path", part["path"])
+            key = Path(original).stem
 
-        base = urljoin(url, document.base) if document.base else url
-        reader.validate_resource(base, origin)
+            # Resolve markup relative to its validated document base.
+            base = urljoin(url, document.base) if document.base else url
+            reader.validate_resource(base, origin)
 
-        # Resolve image rules against the document base and stylesheet URL.
-        mapped: set[str] = set()
-        for href in document.stylesheets:
-            stylesheet = urljoin(base, href)
-            if stylesheet not in styles:
-                response = reader.resource(stylesheet, origin)
-                if "text/css" not in response.headers.get("Content-Type", ""):
-                    raise ServiceResponseError("Expected a reader stylesheet.")
-                styles[stylesheet] = {
-                    name: urljoin(stylesheet, ref)
-                    for name, ref in css_images(response.text, keys).items()
-                }
-            if key in styles[stylesheet]:
-                mapped.add(styles[stylesheet][key])
+            # A single img is a direct document-to-image association. Do not
+            # assume it has an ID, or that its name matches the XHTML filename.
+            # Multiple images or SVG compositions need a separate rendering policy.
+            if len(document.images) > 1 or document.svg_images:
+                raise ServiceResponseError("Component is not one unambiguous inline page image.")
 
-        if len(mapped) != 1:
-            raise ServiceResponseError("Component lacks one unambiguous stylesheet image.")
+            inline = {urljoin(base, source) for source in document.images}
 
-        # A single validated association is retained in source spine order.
-        image_url = mapped.pop()
-        reader.validate_resource(image_url, origin)
-        path = urlsplit(image_url).path
-        if not re.fullmatch(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+", path):
-            raise ServiceResponseError("Image has an unsupported source path.")
+            # CSS backgrounds still require the observed filename-to-element
+            # binding. An inline image does not need that CSS-specific convention.
+            if not inline and key not in document.ids:
+                raise ServiceResponseError("Component markup lacks its expected page element.")
 
-        is_cover = cover_target in (part["path"], original, part.get("id"))
-        role = "cover" if is_cover else "narrative" if part["linear"] else "nonlinear"
-        assets.append(Asset(original, index, role, path, image_url))
+            mapped: set[str] = set()
+            for href in document.stylesheets:
+                stylesheet = urljoin(base, href)
+                if stylesheet not in styles:
+                    response = reader.resource(stylesheet, origin)
+                    if "text/css" not in response.headers.get("Content-Type", ""):
+                        raise ServiceResponseError("Expected a reader stylesheet.")
+                    styles[stylesheet] = {
+                        name: urljoin(stylesheet, ref)
+                        for name, ref in css_images(response.text, keys).items()
+                    }
+                if key in document.ids and key in styles[stylesheet]:
+                    mapped.add(styles[stylesheet][key])
+
+            if inline and mapped:
+                raise ServiceResponseError("Component mixes inline and background page images.")
+
+            mapped.update(inline)
+            if len(mapped) != 1:
+                raise ServiceResponseError("Component lacks one unambiguous page image.")
+
+            # A single validated association is retained in source spine order.
+            image_url = mapped.pop()
+            reader.validate_resource(image_url, origin)
+            path = urlsplit(image_url).path
+            if not re.fullmatch(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+", path):
+                raise ServiceResponseError("Image has an unsupported source path.")
+
+            is_cover = cover_target in (part["path"], original, part.get("id"))
+            role = "cover" if is_cover else "narrative" if part["linear"] else "nonlinear"
+            assets.append(Asset(original, index, role, path, image_url))
+            # Report only a fully resolved component, including its stylesheet
+            # and image association. This phase fetches documents, not images.
+            if progress:
+                progress(index + 1, len(spine))
 
     return assets
 
@@ -278,7 +332,9 @@ def download_image(
     reader: OverDriveReadClient, asset: Asset, origin: str, filename: Path
 ) -> DownloadedImageFile:
     """Inspect an original image without changing the bytes written to disk."""
-    response = reader.resource(asset.url, origin)
+    # The reader may redirect an image to its public CacheFly asset host.
+    # Documents and stylesheets continue to require the reader origin.
+    response = reader.resource(asset.url, origin, image_cdn=True)
     content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
 
     expected = {"image/jpeg": ("JPEG", ".jpg"), "image/png": ("PNG", ".png")}

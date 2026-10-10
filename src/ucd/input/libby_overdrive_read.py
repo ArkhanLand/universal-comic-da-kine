@@ -144,14 +144,17 @@ def decode_openbook(html: str, buid: str) -> dict[str, Any]:
         raise ServiceResponseError("Cannot decode the reader's openbook envelope.") from None
 
 
-def _read_url(url: str, *, origin: str | None = None) -> str:
+def _read_url(url: str, *, origin: str | None = None, image_cdn: bool = False) -> str:
     try:
         parts = urlsplit(url)
         valid = (
             parts.scheme == "https"
             and parts.username is None
             and parts.password is None
-            and re.fullmatch(r"dewey-[a-z0-9-]+\.read\.libbyapp\.com", parts.hostname or "")
+            and (
+                re.fullmatch(r"dewey-[a-z0-9-]+\.read\.libbyapp\.com", parts.hostname or "")
+                or (image_cdn and parts.hostname == "odrresources.cachefly.net")
+            )
             and parts.port in (None, 443)
             and not parts.fragment
         )
@@ -160,7 +163,11 @@ def _read_url(url: str, *, origin: str | None = None) -> str:
     if not valid:
         raise ServiceResponseError("Fulfillment did not provide a recognized HTTPS read host.")
     current_origin = f"https://{parts.hostname}"
-    if origin is not None and current_origin != origin:
+    if (
+        origin is not None
+        and current_origin != origin
+        and not (image_cdn and current_origin == "https://odrresources.cachefly.net")
+    ):
         raise ServiceResponseError("Reader handshake redirected outside its read host.")
     return current_origin
 
@@ -215,8 +222,8 @@ class OverDriveReadClient:
     def __init__(self, client: httpx.Client) -> None:
         self.client = client
 
-    def _get(self, url: str, origin: str) -> httpx.Response:
-        _read_url(url, origin=origin)
+    def _get(self, url: str, origin: str, *, image_cdn: bool = False) -> httpx.Response:
+        destination = _read_url(url, origin=origin, image_cdn=image_cdn)
         request = self.client.build_request(
             "GET",
             url,
@@ -227,6 +234,10 @@ class OverDriveReadClient:
             },
         )
         request.headers.pop("Authorization", None)
+        # Some reader image endpoints redirect to this public asset CDN.
+        # It receives no session cookies, including cookies from client defaults.
+        if destination == "https://odrresources.cachefly.net":
+            request.headers.pop("Cookie", None)
         try:
             response = self.client.send(request, follow_redirects=False)
         except httpx.HTTPError:
@@ -245,10 +256,13 @@ class OverDriveReadClient:
     def validate_resource(url: str, origin: str) -> None:
         _read_url(url, origin=origin)
 
-    def resource(self, url: str, origin: str) -> httpx.Response:
-        """Fetch a reader resource with bounded same-origin redirects."""
+    def resource(self, url: str, origin: str, *, image_cdn: bool = False) -> httpx.Response:
+        """Fetch a reader resource; only images may redirect to the asset CDN."""
+        # Every initial association must still originate on the authorized
+        # reader host. The CDN exception applies only after an image redirect.
+        _read_url(url, origin=origin)
         for _ in range(8):
-            response = self._get(url, origin)
+            response = self._get(url, origin, image_cdn=image_cdn)
             if response.is_redirect:
                 location = response.headers.get("Location")
                 if not location:

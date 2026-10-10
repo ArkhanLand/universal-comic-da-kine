@@ -24,6 +24,41 @@ is not one of its entries. Counts and logical-mapping validation belong to
 Publication. The adapter's intermediate `get_pages()` result still uses
 `Pages` during acquisition; it is unpacked when constructing Publication.
 
+Marvel and Libby use `download.parallel.fetch_ordered()` for bounded network
+concurrency, selected by `download --workers N` (positive integer, default 1).
+The helper prefetches a limited window and delivers results in source order.
+Marvel checks its verified cache before scheduling network work, then
+publishes new receipts and assembles pages on the consumer thread. Refresh
+bypasses reuse. Libby uses the same helper for component documents and images;
+only Libby needs the Mapping phase. Authentication and metadata dependencies
+remain sequential. Original image bytes, acquisition timestamps, and page
+order retain their existing meanings. Synthetic tests cover overlap, cache
+reuse, refresh, and failure recovery.
+
+On 2026-10-09, fresh Marvel downloads of *Doctor Strange Annual (2016) #1*
+(32 images) were measured at several worker counts. Each command used
+`--refresh --overwrite`, so cache reuse did not replace network acquisition.
+
+| Workers | Elapsed (s) | User CPU (s) | System CPU (s) |
+| ---: | ---: | ---: | ---: |
+| 1 | 13.882 | 1.282 | 0.270 |
+| 4 | 4.152 | 0.934 | 0.178 |
+| 8 | 1.191 | 0.629 | 0.147 |
+| 16 | 1.058 | 0.675 | 0.211 |
+| 32 | 1.220 | 0.731 | 0.308 |
+
+The one-/32-worker archive pair and the later four-/eight-worker pair passed
+ZIP integrity checks; all image bytes and archive member order matched
+exactly within each pair. The sixteen-worker output was overwritten before
+independent comparison. The test used an Apple
+M1 Max MacBook Pro with 10 CPU cores (8 performance, 2 efficiency), 32 GiB RAM,
+and macOS 26.7.1 (build `25G241`). Eight workers delivered nearly all of the
+observed improvement for this issue, while sixteen was slightly quicker and
+32 provided no additional gain. These are single live observations, not
+repeated controlled benchmarks; differences around a tenth of a second do
+not establish an optimal worker count. Renewed browser-exported Marvel cookies
+were required before the test succeeded.
+
 `CBZInputAdapter` implements the same contract for local archives. It returns
 persistent cached paths, a `Publication.source_representation` carrying the
 exact archive, and an optional `Publication.comic_metadata` attachment holding
@@ -149,14 +184,17 @@ download support.
 `LibbyOverDriveReadAdapter` verifies current checkouts, fetches catalog and
 reader metadata, maps the supported page elements through their stylesheets,
 and returns a complete Publication with original image bytes. API and reader
-clients have separate cookie jars. Every resource and redirect stays on the
-validated HTTPS reader origin. Component bases are honored only on that
-origin.
+clients have separate cookie jars. Documents, stylesheets, and component bases
+stay on the validated HTTPS reader origin. Images start there but may redirect
+to the exact HTTPS host `odrresources.cachefly.net`; CDN requests carry neither
+Authorization nor Cookie headers. Other destinations remain rejected.
 
-The restricted CSS parser accepts plain ID selectors and single background
-URLs. Ambiguous mappings and conditional page-image rules fail explicitly; it
-does not implement a browser cascade. The component body decoder accepts the
-observed `__bif_cfc1` string transformation without executing JavaScript.
+The mapper accepts a single direct XHTML image, including publisher-named
+components without element IDs. The CSS-background path uses a restricted
+parser accepting plain ID selectors and single background URLs. Ambiguous
+mappings and conditional page-image rules fail explicitly; it does not
+implement a browser cascade. The component body decoder accepts the observed
+`__bif_cfc1` string transformation without executing JavaScript.
 
 Libby and Marvel share the existing measured pagination heuristic. Explicit
 reading direction and first-page position come from reader metadata; unknown

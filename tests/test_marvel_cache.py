@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 from datetime import datetime
 from io import BytesIO
+from threading import Barrier, Event
 from zipfile import ZipFile
 
 import httpx
@@ -58,11 +59,12 @@ class MarvelServer:
             200, content=self.images[asset_id], headers={"Content-Type": "image/png"}
         )
 
-    def adapter(self, root, *, refresh=False):
+    def adapter(self, root, *, refresh=False, workers=1):
         return MarvelUnlimitedAdapter(
             client=httpx.Client(transport=httpx.MockTransport(self.handle)),
             cache_dir=root,
             refresh=refresh,
+            workers=workers,
         )
 
 
@@ -72,6 +74,62 @@ def acquire(adapter, digital_id="39895", progress=None):
 
 def records(root):
     return [json.loads(p.read_text()) for p in (root / "acquisitions").glob("*.json")]
+
+
+def test_parallel_order(tmp_path):
+    server = MarvelServer()
+    handler = server.handle
+    barrier = Barrier(3)
+    last_page = Event()
+
+    def parallel(request):
+        if request.url.host == "example.com":
+            barrier.wait(timeout=5)
+            if request.url.path.endswith("cover.png"):
+                assert last_page.wait(timeout=5)
+            elif request.url.path.endswith("two.png"):
+                last_page.set()
+        return handler(request)
+
+    server.handle = parallel
+    updates = []
+    pages = acquire(
+        server.adapter(tmp_path, workers=3), progress=lambda *args: updates.append(args)
+    )
+    assert pages.cover.path.read_bytes() == server.images["cover"]
+    assert [page.path.read_bytes() for page in pages.pages] == [
+        server.images["one"],
+        server.images["two"],
+    ]
+    assert updates == [(count, 3) for count in range(4)]
+
+
+def test_parallel_cache(tmp_path):
+    server = MarvelServer()
+    first = acquire(server.adapter(tmp_path, workers=3))
+    before = records(tmp_path)
+    server.downloads = []
+    second = acquire(server.adapter(tmp_path, workers=3))
+    assert first == second
+    assert not server.downloads
+    assert records(tmp_path) == before
+    server.images["one"] = image_bytes("yellow")
+    refreshed = acquire(server.adapter(tmp_path, workers=3, refresh=True))
+    assert sorted(server.downloads) == ["cover", "one", "two"]
+    assert refreshed.pages[0].path.read_bytes() == server.images["one"]
+    assert len(records(tmp_path)) == len(before) + 3
+
+
+def test_parallel_fail(tmp_path):
+    server = MarvelServer()
+    server.fail = "one"
+    with pytest.raises(httpx.HTTPStatusError):
+        acquire(server.adapter(tmp_path, workers=3))
+    assert len(records(tmp_path)) == 1
+    server.fail = None
+    server.downloads = []
+    acquire(server.adapter(tmp_path, workers=3))
+    assert sorted(server.downloads) == ["one", "two"]
 
 
 def test_reuse_and_export(tmp_path):
@@ -192,8 +250,8 @@ def test_refresh_overwrite(tmp_path, monkeypatch):
     publication = make_test_publication(tmp_path)
 
     class Adapter:
-        def __init__(self, *, cookie_file, refresh, cache_dir):
-            observed.append(refresh)
+        def __init__(self, *, cookie_file, refresh, cache_dir, workers):
+            observed.append((refresh, workers))
 
         def get_publication(self, source, progress, metadata_ready):
             metadata_ready(publication.title, publication.series, publication.issue_number)
@@ -208,7 +266,8 @@ def test_refresh_overwrite(tmp_path, monkeypatch):
     assert runner.invoke(app, args).exit_code == 0
     assert runner.invoke(app, args + ["--refresh"]).exit_code == 0
     assert runner.invoke(app, args + ["--refresh", "--overwrite"]).exit_code == 0
-    assert observed == [False, True, True]
+    assert runner.invoke(app, args + ["--refresh", "--overwrite", "--workers", "16"]).exit_code == 0
+    assert observed == [(False, 1), (True, 1), (True, 1), (True, 16)]
 
 
 def test_resume_import(tmp_path):

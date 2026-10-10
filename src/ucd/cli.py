@@ -1,5 +1,7 @@
 import os
+import sys
 from pathlib import Path
+from shutil import get_terminal_size
 from tempfile import TemporaryDirectory
 
 import httpx
@@ -22,35 +24,114 @@ app = typer.Typer(no_args_is_help=True)
 
 
 class _ProgressBar:
-    def __init__(self, width: int = 30, label_width: int = 32) -> None:
+    """Keep interactive progress on one line and captured output readable."""
+
+    def __init__(self, width: int = 30) -> None:
         self.width = width
-        self.label_width = label_width
         self._last_completed = -1
+        self._phase: str | None = None
+        self._title_shown = False
+        self._line_open = False
+        self._interactive = sys.stdout.isatty()
+        self._status_steps = 0
+        self._pending_status = False
+
+    def begin(self, label: str) -> None:
+        """Print the known title before displaying any preliminary status."""
+        if not self._title_shown:
+            typer.echo(f"Acquiring {label}")
+            self._title_shown = True
+            if self._pending_status:
+                self._render_status()
+
+    def status(self, message: str) -> None:
+        """Advance one dot per setup milestone, keeping details out of the UI."""
+        self._status_steps += 1
+        self._pending_status = True
+        # The adapter may report early checks before catalog lookup supplies
+        # a title. Buffer those updates so the title is always printed first.
+        if self._title_shown:
+            self._render_status()
+
+    def _status_line(self) -> str:
+        return "Gathering metadata" + "." * self._status_steps
+
+    def _render_status(self) -> None:
+        if self._interactive:
+            line = self._status_line()
+            available = max(1, get_terminal_size().columns - 1)
+            line = line[:available]
+            typer.echo("\r\x1b[2K" + line, nl=False, color=True)
+            self._line_open = True
+            self._pending_status = False
+
+    def finish(self) -> None:
+        """Separate a following status or error from an unfinished bar."""
+        if self._line_open:
+            typer.echo()
+            self._line_open = False
+        if self._pending_status:
+            typer.echo(self._status_line())
+            self._pending_status = False
 
     def reset(self) -> None:
+        self.finish()
         self._last_completed = -1
+        self._phase = None
+        self._title_shown = False
+        self._status_steps = 0
 
-    def _display_label(self, label: str) -> str:
-        if len(label) <= self.label_width:
-            return label
-        return "…" + label[-(self.label_width - 1) :]
+    def _line(self, completed: int, total: int, percent: int, phase: str = "Images") -> str:
+        if phase == "Images":
+            phase = " Images"
+        # Reserve the final terminal column: writing there can wrap the next
+        # carriage-return update onto another row. Print the title separately
+        # so long titles do not compete with the image counter.
+        available = max(1, get_terminal_size().columns - 1)
+        counter = f"{completed}/{total} {percent:3d}%"
+        width = min(self.width, available - len(phase) - len(counter) - 4)
+        if width < 3:
+            compact = f"{percent}%"
+            return counter if len(counter) <= available else compact[:available]
+
+        filled = min(width, int(completed / total * width)) if total else width
+        bar = "#" * filled + "-" * (width - filled)
+        return f"{phase} [{bar}] {counter}"
 
     def update(self, label: str, completed: int, total: int) -> None:
+        self._update(label, completed, total, "Images")
+
+    def mapping(self, label: str, completed: int, total: int) -> None:
+        self._update(label, completed, total, "Mapping")
+
+    def _update(self, label: str, completed: int, total: int, phase: str) -> None:
+        self.begin(label)
+        # A phase starts its own count, but shares the title and rendering
+        # with all download services. Mapping must not look like image fetches.
+        if phase != self._phase:
+            self.finish()
+            self._last_completed = -1
+            self._phase = phase
         if completed == self._last_completed:
             return
 
+        first = self._last_completed < 0
         self._last_completed = completed
-        ratio = completed / total if total else 1.0
-        filled = min(self.width, int(ratio * self.width))
-        bar = "#" * filled + "-" * (self.width - filled)
-        percent = int(ratio * 100)
-        typer.echo(
-            f"\rAcquiring {self._display_label(label)} [{bar}] {completed}/{total} {percent:3d}%",
-            nl=False,
-        )
+        percent = min(100, int(completed / total * 100)) if total else 100
 
-        if completed >= total:
-            typer.echo()
+        if self._interactive:
+            # Clear the old row as well as returning to its start; shorter
+            # counters and terminal resizes must not leave stale characters.
+            typer.echo(
+                "\r\x1b[2K" + self._line(completed, total, percent, phase), nl=False, color=True
+            )
+            self._line_open = True
+            if completed >= total:
+                self.finish()
+        elif first or completed >= total:
+            # A file or pipe cannot redraw a row. Keep just the start and end
+            # of each phase, rather than logging every acquired image.
+            typer.echo(f"{phase}: {completed}/{total} ({percent}%)")
 
 
 @app.callback()
@@ -272,6 +353,9 @@ def download(
     ),
     library_card: str | None = typer.Option(None, "--library-card"),
     cache_dir: Path | None = typer.Option(None, "--cache-dir", envvar="UCD_CACHE_DIR"),
+    workers: int = typer.Option(
+        1, "--workers", min=1, help="Concurrent image fetches; 1 keeps sequential behavior."
+    ),
     output_format: str = typer.Option("cbz", "--output-format"),
     continue_on_error: bool = typer.Option(False, "--continue-on-error"),
     quit_on_error: bool = typer.Option(False, "--quit-on-error", hidden=True),
@@ -319,13 +403,17 @@ def download(
                             library_card=library_card,
                             cache_dir=cache_dir,
                             refresh=refresh,
-                            status=typer.echo,
+                            mapping_progress=progress.mapping,
+                            status=progress.status,
+                            title_ready=progress.begin,
+                            workers=workers,
                         )
                     else:
                         adapters[selected] = MarvelUnlimitedAdapter(
                             cookie_file=cookie_file,
                             refresh=refresh,
                             cache_dir=cache_dir / selected if cache_dir is not None else None,
+                            workers=workers,
                         )
                 publication = adapters[selected].get_publication(
                     source,
@@ -349,15 +437,27 @@ def download(
                         os.link(temporary, destination)
                 typer.echo(f"Wrote {destination}")
             except FileExistsError as exc:
+                progress.finish()
                 typer.echo(f"Skipped existing output: {exc}")
             except (LibbyAuthenticationError, CredentialStoreError) as exc:
+                progress.finish()
                 typer.echo(f"Error: {exc}", err=True)
                 raise typer.Exit(code=1) from None
             except (ComicDownloaderError, OSError, ValueError, httpx.HTTPError) as exc:
+                progress.finish()
                 failures += 1
-                message = (
-                    "Service connection failed." if isinstance(exc, httpx.HTTPError) else str(exc)
-                )
+                # HTTPX exception text can contain signed URLs. Keep those
+                # private while retaining the status or transport failure type
+                # needed to distinguish expired cookies from network failures.
+                if isinstance(exc, httpx.HTTPStatusError):
+                    status = exc.response.status_code
+                    message = f"Service request failed (HTTP {status})."
+                    if selected == "marvel-unlimited" and status in (401, 403):
+                        message += " Refresh Marvel cookies and pass --cookies PATH."
+                elif isinstance(exc, httpx.HTTPError):
+                    message = f"Service connection failed ({type(exc).__name__})."
+                else:
+                    message = str(exc)
                 typer.echo(f"Error: {message}", err=True)
                 if not continue_on_error:
                     raise typer.Exit(code=1) from None
@@ -365,6 +465,7 @@ def download(
         if failures:
             raise typer.Exit(code=1)
     finally:
+        progress.finish()
         for adapter in adapters.values():
             adapter.cleanup()
 
@@ -429,6 +530,7 @@ def convert(
                     os.link(temporary, destination)
             typer.echo(f"Wrote {destination}")
         except (ComicDownloaderError, OSError, ValueError) as exc:
+            progress.finish()
             failures += 1
             typer.echo(f"Error: {exc}", err=True)
             if quit_on_error:
