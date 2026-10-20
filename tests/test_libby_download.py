@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 import httpx
 import pytest
+import typer
 from PIL import Image
 from typer.testing import CliRunner
 
@@ -703,9 +704,18 @@ def test_cli_cover_rejection(tmp_path, monkeypatch, arguments):
 
     monkeypatch.setattr("ucd.cli.LibbyOverDriveReadAdapter", forbidden)
     monkeypatch.setattr("ucd.cli.MarvelUnlimitedAdapter", forbidden)
-    result = CliRunner().invoke(app, ["download", *arguments, "--output-dir", str(tmp_path)])
+    # Rich can insert color codes inside option names on CI. Exercise that
+    # output too, but assert against its visible text rather than its styling.
+    result = CliRunner().invoke(
+        app,
+        ["download", *arguments, "--output-dir", str(tmp_path)],
+        env={"FORCE_COLOR": "1"},
+        color=True,
+    )
     assert result.exit_code == 2, "Invalid cover-option usage must be a CLI parameter error"
-    assert "cover-index" in result.output, "Parameter errors must identify the cover option"
+    assert "cover-index" in typer.unstyle(result.output), (
+        "Parameter errors must identify the cover option regardless of terminal styling"
+    )
 
 
 def test_landmark_download(tmp_path, monkeypatch):
