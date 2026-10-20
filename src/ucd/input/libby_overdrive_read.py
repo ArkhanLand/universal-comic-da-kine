@@ -8,7 +8,7 @@ import base64
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -172,6 +172,57 @@ def _read_url(url: str, *, origin: str | None = None, image_cdn: bool = False) -
     return current_origin
 
 
+def _cover_index(nav: Any, spine: list[dict[str, Any]]) -> int:
+    """Resolve cover evidence without treating the first component as a cover."""
+    if not isinstance(nav, dict):
+        raise ServiceResponseError("Openbook has no cover navigation.")
+
+    # Semantic landmarks take precedence. Preserve the existing landmark
+    # interpretation without letting weaker TOC labels invalidate it.
+    if "landmarks" in nav:
+        landmarks = nav["landmarks"]
+        if not isinstance(landmarks, list):
+            raise ServiceResponseError("Openbook has malformed cover landmarks.")
+        covers = [
+            item for item in landmarks if isinstance(item, dict) and item.get("type") == "cover"
+        ]
+        # Do not conceal malformed or incomplete explicit landmark metadata
+        # by falling back to the weaker TOC label.
+        if len(covers) != 1:
+            raise ServiceResponseError("Openbook does not identify one unambiguous cover.")
+        reference = covers[0]
+    else:
+        # Some collections expose only a flat TOC with an entry titled
+        # 'Cover'. This English label is an observed fallback, not an EPUB
+        # semantic type. Inspect it only when landmarks are absent.
+        toc = nav.get("toc", [])
+        if not isinstance(toc, list):
+            raise ServiceResponseError("Openbook has malformed cover navigation.")
+        toc_covers = [
+            item
+            for item in toc
+            if isinstance(item, dict)
+            and isinstance(item.get("title"), str)
+            and item["title"].strip().casefold() == "cover"
+        ]
+        if len(toc_covers) != 1:
+            raise ServiceResponseError("Openbook does not identify one unambiguous TOC cover.")
+        reference = toc_covers[0]
+
+    # Both routes must identify exactly one component in the source spine.
+    path = reference.get("path")
+    target = path.split("#", 1)[0] if isinstance(path, str) else ""
+    matched = [
+        index
+        for index, entry in enumerate(spine)
+        if target
+        and target in (entry.get("path"), entry.get("-odread-original-path"), entry.get("id"))
+    ]
+    if len(matched) != 1:
+        raise ServiceResponseError("Cover navigation does not match one spine component.")
+    return matched[0]
+
+
 @dataclass(frozen=True)
 class ReadRendition:
     """Ephemeral authorized rendition; never serialize this object wholesale."""
@@ -179,7 +230,12 @@ class ReadRendition:
     web_url: str = field(repr=False)
     openbook: dict[str, Any] = field(repr=False)
 
-    def summary(self) -> dict[str, str | int]:
+    def component_roles(self) -> tuple[Literal["cover", "narrative", "nonlinear"], ...]:
+        """Resolve roles for inspection, mapping, and page-side selection.
+
+        Keep the raw openbook intact: inferred defaults must not appear as
+        explicit source metadata in retained provenance.
+        """
         spine = self.openbook.get("spine")
         if not isinstance(spine, list) or not spine:
             raise ServiceResponseError("Openbook has no spine components.")
@@ -187,31 +243,29 @@ class ReadRendition:
             raise ServiceResponseError("Openbook has a malformed spine.")
         if any(entry.get("rendition-layout") != "pre-paginated" for entry in spine):
             raise UnavailableError("This rendition is not supported fixed-layout OverDrive Read.")
-        if any(not isinstance(entry.get("linear"), bool) for entry in spine):
-            raise ServiceResponseError("Openbook lacks explicit spine linearity.")
-        nav = self.openbook.get("nav")
-        landmarks = nav.get("landmarks") if isinstance(nav, dict) else None
-        if not isinstance(landmarks, list):
-            raise ServiceResponseError("Openbook has no cover landmarks.")
-        covers = [
-            item for item in landmarks if isinstance(item, dict) and item.get("type") == "cover"
-        ]
-        if len(covers) != 1:
-            raise ServiceResponseError("Openbook does not identify one unambiguous cover.")
-        target = str(covers[0].get("path", "")).split("#", 1)[0]
-        matched = [
-            entry
-            for entry in spine
-            if target in (entry.get("path"), entry.get("-odread-original-path"), entry.get("id"))
-        ]
-        if not target or len(matched) != 1 or matched[0]["linear"] is not False:
-            raise ServiceResponseError("Cover landmark and spine semantics disagree.")
+        if any("linear" in entry and not isinstance(entry["linear"], bool) for entry in spine):
+            raise ServiceResponseError("Openbook has invalid spine linearity.")
+
+        cover = _cover_index(self.openbook.get("nav"), spine)
+        if spine[cover].get("linear") is True:
+            raise ServiceResponseError("Cover navigation and spine semantics disagree.")
+
+        # EPUB itemrefs default to linear when the attribute is omitted.
+        # Apply that same default to this reader projection, except for the
+        # separately identified cover. Explicit false still means auxiliary.
+        return tuple(
+            "cover" if index == cover else "narrative" if entry.get("linear", True) else "nonlinear"
+            for index, entry in enumerate(spine)
+        )
+
+    def summary(self) -> dict[str, str | int]:
+        roles = self.component_roles()
         direction = self.openbook.get("i18n-page-progression-direction")
         return {
-            "spine_components": len(spine),
+            "spine_components": len(roles),
             "cover_components": 1,
-            "narrative_components": sum(entry["linear"] for entry in spine),
-            "nonlinear_components": sum(not entry["linear"] for entry in spine),
+            "narrative_components": roles.count("narrative"),
+            "nonlinear_components": len(roles) - roles.count("narrative"),
             "reading_direction": direction if direction in ("ltr", "rtl") else "unknown",
         }
 

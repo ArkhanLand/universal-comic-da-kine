@@ -141,9 +141,12 @@ ucd download --service libby-overdrive TITLE_ID --output-dir ./comics
 automatically.
 
 Other Libby formats and unsupported page mappings fail explicitly. Images
-retain their exact source bytes; cover and reading order come from the reader
-spine and landmarks. RTL does not reverse that order. Libby filenames use the
-full title when no explicit issue number is known, preventing different
+retain their exact source bytes; reading order comes from the reader spine.
+The cover comes from a landmark or, when landmarks are absent, a unique TOC
+entry titled `Cover`. Omitted spine linearity defaults to reading-sequence
+content except for that identified cover; explicit auxiliary entries retain
+their non-narrative role. RTL does not reverse spine order. Libby filenames
+use the full title when no explicit issue number is known, preventing different
 volumes of the same series from sharing a filename.
 
 Downloads stop on the first failure. `--continue-on-error` processes

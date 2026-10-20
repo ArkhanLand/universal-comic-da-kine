@@ -572,6 +572,69 @@ def test_inline_originals(tmp_path, monkeypatch):
     assert capture["assets"][0]["source_path"] == "/OEBPS/images/cover.jpg"
 
 
+@pytest.mark.parametrize("workers", [1, 4])
+def test_toc_collection(tmp_path, monkeypatch, workers):
+    server = InlineServer()
+    # Match the observed pages/N.xhtml structure without retaining any live
+    # response. All navigation and image bytes in this fixture are synthetic.
+    for number, part in enumerate(server.book["spine"], start=1):
+        image = server.component_images.pop("/" + part["path"])
+        part["path"] = f"pages/{number}.xhtml"
+        part.pop("linear")
+        part["rendition-position"] = "left" if number % 2 else "right"
+        server.component_images["/" + part["path"]] = image
+    server.book["nav"] = {"toc": [{"title": "Cover", "path": "pages/1.xhtml"}]}
+    server.book.pop("i18n-page-progression-direction")
+    source = deepcopy(server.book)
+    adapter = server.adapter(tmp_path, monkeypatch)
+    adapter.workers = workers
+    publication = adapter.get_publication("123")
+    assert publication.cover.path.read_bytes() == server.images["cover.jpg"], (
+        "TOC-selected cover must retain its original image bytes"
+    )
+    assert [page.path.read_bytes() for page in publication.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ], "Narrative image bytes and spine order must survive acquisition"
+    assert publication.first_page_side == "right", "Use the first narrative component's side"
+    assert publication.reading_direction is None, "Page sides must not infer reading direction"
+    assert server.book == source, "Role interpretation must leave source metadata unchanged"
+    capture = json.loads(next(tmp_path.glob("libby-overdrive/123/captures/*.json")).read_text())
+    retained = capture["sources"]["reader"]
+    assert all("linear" not in part for part in retained["spine"]), (
+        "Retained source metadata must not manufacture linearity fields"
+    )
+    assert "landmarks" not in retained["nav"], "Retained metadata must not invent landmarks"
+    assert [asset["role"] for asset in capture["assets"]] == ["cover", "narrative", "narrative"], (
+        "Acquisition receipts must record resolved roles in spine order"
+    )
+    output = tmp_path / "collection.cbz"
+    write_cbz(prepare_comic_metadata(publication), output)
+    with ZipFile(output) as archive:
+        assert archive.read("00000.jpg") == server.images["cover.jpg"], (
+            "CBZ must retain the original cover as its first image"
+        )
+        assert archive.read("00001.jpg") == server.images["z.jpg"], (
+            "CBZ must retain the first narrative image after the cover"
+        )
+        assert archive.read("00002.jpg") == server.images["a.jpg"], (
+            "CBZ must preserve spine order rather than sorting source filenames"
+        )
+
+
+def test_landmark_download(tmp_path, monkeypatch):
+    server = Server()
+    server.book["nav"]["toc"] = [{"title": "Cover", "path": "html/page002.xhtml"}]
+    publication = server.adapter(tmp_path, monkeypatch).get_publication("123")
+    assert publication.cover.path.read_bytes() == server.images["cover.jpg"], (
+        "Landmark must select the cover despite a contradictory TOC label"
+    )
+    assert [page.path.read_bytes() for page in publication.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ], "Contradictory TOC labels must not alter narrative membership or image order"
+
+
 @pytest.mark.parametrize(
     "markup",
     [
