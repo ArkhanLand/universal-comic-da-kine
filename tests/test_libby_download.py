@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from copy import deepcopy
 from io import BytesIO
 from threading import Barrier, Event
@@ -7,7 +8,6 @@ from zipfile import ZipFile
 
 import httpx
 import pytest
-import typer
 from PIL import Image
 from typer.testing import CliRunner
 
@@ -713,7 +713,8 @@ def test_cli_cover_rejection(tmp_path, monkeypatch, arguments):
         color=True,
     )
     assert result.exit_code == 2, "Invalid cover-option usage must be a CLI parameter error"
-    assert "cover-index" in typer.unstyle(result.output), (
+    plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "cover-index" in plain_output, (
         "Parameter errors must identify the cover option regardless of terminal styling"
     )
 
