@@ -4,13 +4,93 @@ from io import BytesIO
 import httpx
 import pytest
 from PIL import Image
+from typer.testing import CliRunner
 
-from ucd.cli import _ProgressBar
+from tests.helpers import make_test_publication
+from ucd.cli import _ProgressBar, app, wait_for_delay
 from ucd.input.marvel_unlimited import (
     MarvelUnlimitedAdapter,
     _MarvelPageSource,
     _MarvelPageSources,
 )
+from ucd.metadata import prepare_comic_metadata
+
+
+def test_wait_for_delay() -> None:
+    waits: list[float] = []
+    wait_for_delay(1.5, waits.append)
+    assert waits == [1.5]
+
+
+def test_waiting_output(capsys, monkeypatch) -> None:
+    progress = _ProgressBar()
+    progress.waiting(1.5)
+    output = capsys.readouterr()
+    expected = "Waiting 1.5 secs between issues\n"
+    assert output.out == expected, "Test non-interactive stdout"
+    assert output.err == "", "Test non-interactive stderr"
+
+    monkeypatch.setattr(
+        "ucd.cli.get_terminal_size",
+        lambda: os.terminal_size((80, 24)),
+    )
+    progress = _ProgressBar()
+    progress._interactive = True
+    progress.waiting(1.5)
+
+    output = capsys.readouterr()
+    expected = "\r\x1b[2KWaiting [" + "-" * 30 + "] 1.5s"
+    assert output.out == expected, "Test interactive 80col stdout"
+    assert output.err == "", "Test interactive 80col stderr"
+
+    monkeypatch.setattr(
+        "ucd.cli.get_terminal_size",
+        lambda: os.terminal_size((10, 24)),
+    )
+    progress = _ProgressBar()
+    progress._interactive = True
+    progress.waiting(1.5)
+
+    output = capsys.readouterr()
+    expected = "\r\x1b[2Kting 1.5s"
+    assert output.out == expected, "Test interactive 10col stdout"
+    assert output.err == "", "Test interactive 10col output"
+
+
+@pytest.mark.parametrize(
+    "sources, options, expected_waits",
+    [
+        (["1", "2", "3"], [], [1.0, 1.0]),
+        (["1"], [], []),
+        (["1", "2", "3"], ["--issue-delay", "0"], []),
+        (["1", "2", "3"], ["--issue-delay", "0.25"], [0.25, 0.25]),
+    ],
+    ids=["default", "single", "disabled", "fractional"],
+)
+def test_issue_delay(tmp_path, monkeypatch, sources, options, expected_waits) -> None:
+    publication = make_test_publication(tmp_path)
+
+    class Adapter:
+        def __init__(self, *, cookie_file, refresh, cache_dir, workers):
+            pass
+
+        def get_publication(self, source, progress, metadata_ready):
+            metadata_ready(publication.title, publication.series, publication.issue_number)
+            return prepare_comic_metadata(publication)
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr("ucd.cli.MarvelUnlimitedAdapter", Adapter)
+
+    runner = CliRunner()
+    args = ["download"] + sources + options + ["--output-dir", str(tmp_path / "output")]
+    waits: list[float] = []
+    monkeypatch.setattr("ucd.cli.wait_for_delay", waits.append)
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, f"Exit code nonzero: {result.exit_code}"
+    assert waits == expected_waits
 
 
 def test_download_progress(tmp_path, monkeypatch) -> None:

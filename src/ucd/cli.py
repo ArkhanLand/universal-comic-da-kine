@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from shutil import get_terminal_size
 from tempfile import TemporaryDirectory
@@ -36,6 +38,8 @@ class _ProgressBar:
         self._status_steps = 0
         self._pending_status = False
 
+    # Only print the title a single time. moving the logic into here allows us
+    # to print the title safely from any other method.
     def begin(self, label: str) -> None:
         """Print the known title before displaying any preliminary status."""
         if not self._title_shown:
@@ -53,6 +57,23 @@ class _ProgressBar:
         if self._title_shown:
             self._render_status()
 
+    def waiting(self, issue_delay: float) -> None:
+        if self._interactive:
+            prefix = "Waiting ["
+            suffix = f"] {issue_delay:g}s"
+
+            available = max(1, get_terminal_size().columns - 1)
+            bar_width = min(self.width, available - len(prefix) - len(suffix))
+            if bar_width < 3:
+                msg = f"Waiting {issue_delay:g}s"
+                line = msg[-available:]
+            else:
+                bar = "-" * bar_width
+                line = f"{prefix}{bar}{suffix}"
+            self._redraw_line(line)
+        else:
+            typer.echo(f"Waiting {issue_delay:g} secs between issues")
+
     def _status_line(self) -> str:
         return "Gathering metadata" + "." * self._status_steps
 
@@ -61,8 +82,7 @@ class _ProgressBar:
             line = self._status_line()
             available = max(1, get_terminal_size().columns - 1)
             line = line[:available]
-            typer.echo("\r\x1b[2K" + line, nl=False, color=True)
-            self._line_open = True
+            self._redraw_line(line)
             self._pending_status = False
 
     def finish(self) -> None:
@@ -98,6 +118,10 @@ class _ProgressBar:
         bar = "#" * filled + "-" * (width - filled)
         return f"{phase} [{bar}] {counter}"
 
+    def _redraw_line(self, text: str) -> None:
+        typer.echo("\r\x1b[2K" + text, nl=False, color=True)
+        self._line_open = True
+
     def update(self, label: str, completed: int, total: int) -> None:
         self._update(label, completed, total, "Images")
 
@@ -105,33 +129,49 @@ class _ProgressBar:
         self._update(label, completed, total, "Mapping")
 
     def _update(self, label: str, completed: int, total: int, phase: str) -> None:
+        """This method ensures that the title is only output once."""
         self.begin(label)
-        # A phase starts its own count, but shares the title and rendering
-        # with all download services. Mapping must not look like image fetches.
+
+        # If we're changing phases (e.g. Mapping -> Image), We need to close
+        # out the last progress bar and start a new one. We also need to reset
+        # the _last_completed counter so that progress will allow a report on
+        # step 0 (it tests if "_last_completed < 0").
         if phase != self._phase:
             self.finish()
             self._last_completed = -1
             self._phase = phase
+
+        # If we've already updated the progress at completed, don't udpate
+        # again.
         if completed == self._last_completed:
             return
 
+        # Set the boolean "first" to True only if this is the first time
+        # through this progress bar. It's only used when output isn't going to
+        # a terminal.
         first = self._last_completed < 0
+
+        # Remembering the count suppresses duplicate reports.
         self._last_completed = completed
+
         percent = min(100, int(completed / total * 100)) if total else 100
 
         if self._interactive:
             # Clear the old row as well as returning to its start; shorter
             # counters and terminal resizes must not leave stale characters.
-            typer.echo(
-                "\r\x1b[2K" + self._line(completed, total, percent, phase), nl=False, color=True
-            )
-            self._line_open = True
+            self._redraw_line(self._line(completed, total, percent, phase))
             if completed >= total:
                 self.finish()
         elif first or completed >= total:
             # A file or pipe cannot redraw a row. Keep just the start and end
             # of each phase, rather than logging every acquired image.
             typer.echo(f"{phase}: {completed}/{total} ({percent}%)")
+
+
+def wait_for_delay(delay: float, waiter: Callable[[float], None] = time.sleep) -> None:
+    """Wait the specified number of seconds, then return"""
+    waiter(delay)
+    return
 
 
 @app.callback()
@@ -323,6 +363,27 @@ def register_development_commands(target: typer.Typer) -> None:
 register_development_commands(app)
 
 
+##############################################################################
+#
+# This is the command coordinator for the "ucd download" command.
+# It is passed the parsed arguments from the command line, and decides
+# which input adapter to use. It will download the requested title(s),
+# generate a CBZ for each, store each CBZ into the output_dir, with an
+# automatically generated filename.
+#
+# All Libby authentication and credential-store failures cause immediate
+# exit, regardless of the --continue-on-error option.
+#
+# Returns None on normal completion. Command exit statuses are:
+#
+# Command exit status    Meaning
+# ---------------------------------
+#     0           Success, all issues downloaded (or skipped) as requested.
+#     1           Encountered an error somewhere, and immediately stopped,
+#                 unless --continue-on-error was specified, in which case it
+#                 tried to continue to download as much as it could.
+#     2           Either invalid CLI use, or an invalid CLI parameter.
+#
 @app.command()
 def download(
     sources: list[str] = typer.Argument(..., metavar="SOURCE..."),
@@ -353,8 +414,14 @@ def download(
     ),
     library_card: str | None = typer.Option(None, "--library-card"),
     cache_dir: Path | None = typer.Option(None, "--cache-dir", envvar="UCD_CACHE_DIR"),
+    issue_delay: float = typer.Option(
+        1.0,
+        "--issue-delay",
+        min=0,
+        help="Seconds delay between each issue in multi-issue download; 0 disables",
+    ),
     workers: int = typer.Option(
-        1, "--workers", min=1, help="Concurrent image fetches; 1 keeps sequential behavior."
+        1, "--workers", "-w", min=1, help="Concurrent image fetches; 1 keeps sequential behavior."
     ),
     output_format: str = typer.Option("cbz", "--output-format"),
     continue_on_error: bool = typer.Option(False, "--continue-on-error"),
@@ -386,9 +453,18 @@ def download(
         if destination.exists() and not overwrite:
             raise FileExistsError(destination)
 
+    # Loop over all requested issues and download them
     try:
-        for source in sources:
+        for index, source in enumerate(sources):
             progress.reset()
+
+            if index > 0 and issue_delay > 0:
+                progress.waiting(issue_delay)
+                try:
+                    wait_for_delay(issue_delay)
+                finally:
+                    progress.finish()
+
             try:
                 selected = service or (
                     "libby-overdrive"
