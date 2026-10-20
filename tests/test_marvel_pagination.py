@@ -65,6 +65,7 @@ def test_padded_spans(tmp_path, border_color):
 
 
 def test_span_override(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ucd.download.pagination")
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     single = asset(tmp_path, "single", (100, 150))
     ambiguous = asset(tmp_path, "wide", (267, 150))
@@ -95,6 +96,7 @@ def test_explicit_spans(tmp_path):
 
 
 def test_blank_retained(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ucd.download.pagination")
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     blank = asset(tmp_path, "blank", (267, 150))
     Image.new("RGB", (267, 150), "black").save(blank.path)
@@ -105,6 +107,7 @@ def test_blank_retained(tmp_path, caplog):
 
 
 def test_no_reference(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ucd.download.pagination")
     cover = replace(asset(tmp_path, "cover", (200, 150)), numbers=())
     pages = Pages(cover=cover, pages=(asset(tmp_path, "wide", (400, 150)),))
     assert _infer_page_numbers(pages) == pages
@@ -245,6 +248,7 @@ def test_prefer_interior(tmp_path):
 
 
 def test_retain_white(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ucd.download.pagination")
     page = asset(tmp_path, "white-paper", (400, 150), border=30, border_color=(255, 255, 255))
     assert _pagination_dimensions(page) == (460, 210)
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
@@ -263,6 +267,7 @@ def test_black_padding(tmp_path):
 
 
 def test_resume_at_anchor(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ucd.download.pagination")
     cover = replace(asset(tmp_path, "cover", (100, 150)), numbers=())
     single = asset(tmp_path, "single", (100, 150))
     odd = asset(tmp_path, "odd", (267, 150))
@@ -283,6 +288,7 @@ def test_resume_at_anchor(tmp_path, caplog):
 
 
 def test_xmen_export(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ucd.download.pagination")
     # Synthetic artwork with the observed dimensions and 36-image sequence.
     from zipfile import ZipFile
 

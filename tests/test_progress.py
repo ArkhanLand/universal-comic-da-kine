@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 from io import BytesIO
 
 import httpx
@@ -8,12 +9,88 @@ from typer.testing import CliRunner
 
 from tests.helpers import make_test_publication
 from ucd.cli import _ProgressBar, app, wait_for_delay
+from ucd.download.pagination import _infer_page_numbers
+from ucd.exceptions import ServiceResponseError
 from ucd.input.marvel_unlimited import (
     MarvelUnlimitedAdapter,
     _MarvelPageSource,
     _MarvelPageSources,
 )
 from ucd.metadata import prepare_comic_metadata
+from ucd.models import Pages
+
+
+@pytest.mark.parametrize("scenario", ["known", "unknown", "mixed", "failure"])
+def test_pagination_notice(tmp_path, monkeypatch, scenario):
+    base = make_test_publication(tmp_path)
+    # Real synthetic images exercise the shared inference diagnostic, without
+    # touching a provider. The wider page cannot receive an inferred span.
+    single, wide = base.narrative
+    Image.new("RGB", (100, 150), "red").save(single.path)
+    Image.new("RGB", (267, 150), "blue").save(wide.path)
+    pages = Pages(
+        cover=base.cover,
+        pages=(replace(single, numbers=None), replace(wide, numbers=None, width=267)),
+    )
+
+    class Adapter:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_publication(self, source, progress, metadata_ready):
+            publication = replace(base, title=f"Example {source}")
+            metadata_ready(publication.title, None, None)
+            if scenario != "known" and source == "1":
+                inferred = _infer_page_numbers(pages)
+                publication = replace(publication, narrative=inferred.pages)
+            if scenario == "failure":
+                raise ServiceResponseError("Synthetic acquisition failure")
+            return publication
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr("ucd.cli.LibbyOverDriveReadAdapter", Adapter)
+    sources = ["1", "2"] if scenario == "mixed" else ["1"]
+    output = tmp_path / "output"
+    result = CliRunner().invoke(
+        app,
+        [
+            "download",
+            *sources,
+            "--service",
+            "libby-overdrive",
+            "--issue-delay",
+            "0",
+            "--output-dir",
+            str(output),
+        ],
+    )
+    expected_code = 1 if scenario == "failure" else 0
+    assert result.exit_code == expected_code, "Pagination uncertainty must not fail a download"
+    assert "Cannot infer logical page span" not in result.output, (
+        "Detailed inference diagnostics must not appear in normal CLI output"
+    )
+    notice = "(Warning: logical pagination unknown) "
+    expected_notices = 1 if scenario in {"unknown", "mixed"} else 0
+    assert result.output.count(notice) == expected_notices, (
+        "Report uncertainty once for each successfully written affected book"
+    )
+    written = [line for line in result.stdout.splitlines() if "Wrote " in line]
+    if scenario == "failure":
+        assert not written, "Failed acquisitions must not claim that an archive was written"
+        assert "Error: Synthetic acquisition failure" in result.stderr, (
+            "Real acquisition failures must retain their error message"
+        )
+    else:
+        assert len(written) == len(sources), "Every successful download must report its output"
+        prefix = notice if expected_notices else ""
+        assert written[0].startswith(prefix + "Wrote "), (
+            "The parenthesized warning must precede Wrote on the same line"
+        )
+        assert result.stderr == "", "Nonfatal pagination notices must not look like errors"
+        if scenario == "mixed":
+            assert written[1].startswith("Wrote "), "Pagination notices must not leak between books"
 
 
 def test_wait_for_delay() -> None:
