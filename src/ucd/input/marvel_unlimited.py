@@ -136,7 +136,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
                     name=creator["full_name"],
                     role=creator["role"],
                 )
-                for creator in metadata["creators"]["extended_list"]
+                for creator in metadata["creators"].get("extended_list", [])
             ),
             cover=cover,
             narrative=narrative,

@@ -511,7 +511,15 @@ def download(
                         temporary.replace(destination)
                     else:
                         os.link(temporary, destination)
-                typer.echo(f"Wrote {destination}")
+                # Unknown logical numbering does not prevent a complete CBZ.
+                # Keep the notice with the successful write; detailed image
+                # measurements belong in the pagination module's debug log.
+                notice = (
+                    "(Warning: logical pagination unknown) "
+                    if publication.logical_page_count is None
+                    else ""
+                )
+                typer.echo(f"{notice}Wrote {destination}")
             except FileExistsError as exc:
                 progress.finish()
                 typer.echo(f"Skipped existing output: {exc}")

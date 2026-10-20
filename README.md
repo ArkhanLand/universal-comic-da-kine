@@ -149,6 +149,10 @@ their non-narrative role. RTL does not reverse spine order. Libby filenames
 use the full title when no explicit issue number is known, preventing different
 volumes of the same series from sharing a filename.
 
+If logical page numbering remains uncertain, a successful download reports
+`(Warning: logical pagination unknown) Wrote ...` on one line. The images
+are preserved in source order; detailed inference measurements are debug logs.
+
 Downloads stop on the first failure. `--continue-on-error` processes
 subsequent titles and returns a failing exit status if any title failed.
 Authentication failures always stop. Existing output files are successful

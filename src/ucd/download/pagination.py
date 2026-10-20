@@ -88,9 +88,10 @@ def _infer_page_numbers(pages: Pages) -> Pages:
     """Estimate spans against the dominant portrait interior dimensions.
 
     This is an import heuristic, not a model invariant or source assertion.
-    Explicit mappings win. An ambiguous span warns and leaves pagination unknown
-    until a nonempty explicit mapping anchors subsequent numbering. Counts
-    describe the supplied digital edition, not omitted print pages. Uniform
+    Explicit mappings win. An ambiguous span logs debug details and leaves
+    pagination unknown until a nonempty explicit mapping anchors subsequent
+    numbering. Counts describe the supplied digital edition, not omitted print
+    pages. Uniform
     multi-page assets can defeat the assumed single-page reference; dimensions
     alone cannot resolve that ambiguity.
     """
@@ -107,7 +108,7 @@ def _infer_page_numbers(pages: Pages) -> Pages:
         reference = (pages.cover.width, pages.cover.height)
     else:
         page = next(page for page in pages.pages if page.numbers is None)
-        logger.warning(
+        logger.debug(
             "Cannot infer logical page span for %s: no portrait single-page "
             "reference is available. Preserving assets with unknown pagination; "
             "explicit page-number mappings can resolve it.",
@@ -136,7 +137,7 @@ def _infer_page_numbers(pages: Pages) -> Pages:
                     if dimensions is not None
                     else "no nonblack content"
                 )
-                logger.warning(
+                logger.debug(
                     f"Cannot infer logical page span for {page.path}: "
                     f"original {page.width} x {page.height}, {measurement}, "
                     f"reference {reference[0]} x {reference[1]}; "

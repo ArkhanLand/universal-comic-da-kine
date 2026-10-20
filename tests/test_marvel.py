@@ -383,13 +383,14 @@ def test_download_pages(tmp_path, monkeypatch):
     assert pages.pages[1].path.exists()
 
 
+@pytest.mark.parametrize("has_creators", [True, False], ids=["credits", "no-credits"])
 @pytest.mark.parametrize("digital_format", ["print", "vertical", None])
 @pytest.mark.parametrize(
     "rating_metadata",
     [{"rating": "Rated T+"}, {"rating": None}, {}],
     ids=["rating-present", "rating-null", "rating-missing"],
 )
-def test_publication(monkeypatch, digital_format, rating_metadata):
+def test_publication(monkeypatch, digital_format, rating_metadata, has_creators):
     adapter = MarvelUnlimitedAdapter(client=httpx.Client())
 
     issue_data = _MarvelIssueData(
@@ -422,6 +423,9 @@ def test_publication(monkeypatch, digital_format, rating_metadata):
             ]
         },
     }
+
+    if not has_creators:
+        metadata["creators"] = {}
 
     metadata.update(rating_metadata)
 
@@ -505,9 +509,16 @@ def test_publication(monkeypatch, digital_format, rating_metadata):
     assert publication.imprint is None
     assert publication.thumbnail_url == "https://example.com/thumbnail.jpg"
 
-    assert publication.creators == (
-        Creator(name="Jonathan Hickman", role="writer"),
-        Creator(name="Pepe Larraz", role="penciler"),
+    expected_creators = (
+        (
+            Creator(name="Jonathan Hickman", role="writer"),
+            Creator(name="Pepe Larraz", role="penciler"),
+        )
+        if has_creators
+        else ()
+    )
+    assert publication.creators == expected_creators, (
+        "Missing creator lists must allow export without inventing credits"
     )
 
     assert publication.cover is pages.cover
