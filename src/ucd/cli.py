@@ -413,6 +413,12 @@ def download(
         None, "--service", help="Input service; bare IDs default to Marvel."
     ),
     library_card: str | None = typer.Option(None, "--library-card"),
+    cover_index: int | None = typer.Option(
+        None,
+        "--cover-index",
+        min=0,
+        help="Override the cover's zero-based spine index for one Libby title.",
+    ),
     cache_dir: Path | None = typer.Option(None, "--cache-dir", envvar="UCD_CACHE_DIR"),
     issue_delay: float = typer.Option(
         1.0,
@@ -434,6 +440,19 @@ def download(
         raise typer.BadParameter("Only CBZ output is currently supported.")
     if continue_on_error and quit_on_error:
         raise typer.BadParameter("Choose either --continue-on-error or --quit-on-error.")
+
+    if cover_index is not None:
+        # A visual confirmation concerns one rendition. Do not silently apply
+        # that choice to every title in a batch or to a different adapter.
+        if len(sources) != 1:
+            raise typer.BadParameter("--cover-index requires exactly one Libby title.")
+        override_service = service or (
+            "libby-overdrive"
+            if sources[0].startswith("https://share.libbyapp.com/title/")
+            else "marvel-unlimited"
+        )
+        if override_service != "libby-overdrive":
+            raise typer.BadParameter("--cover-index requires a Libby source.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     adapters: dict[str, MarvelUnlimitedAdapter | LibbyOverDriveReadAdapter] = {}
@@ -482,6 +501,7 @@ def download(
                             mapping_progress=progress.mapping,
                             status=progress.status,
                             title_ready=progress.begin,
+                            cover_index=cover_index,
                             workers=workers,
                         )
                     else:

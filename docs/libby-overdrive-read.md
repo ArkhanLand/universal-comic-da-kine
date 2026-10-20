@@ -102,8 +102,8 @@ image mapping, and selection of the first narrative component's side:
   false remains auxiliary. This follows the default linear reading sequence
   used by [EPUB itemrefs](https://www.w3.org/TR/epub-33/#sec-itemref-elem),
   applied as an interpretation of the reader projection. A supplied non-Boolean
-  value still fails validation. A cover explicitly marked linear also fails
-  rather than silently overriding conflicting source metadata.
+  value still fails validation. Without a user override, a cover explicitly
+  marked linear also fails rather than silently overriding source metadata.
 
 The identified cover remains separate from narrative even if its `linear`
 field is absent. Raw metadata is not modified to manufacture `linear` fields
@@ -117,8 +117,44 @@ Synthetic tests exercise the reader handshake, role interpretation, inline
 mapping, original image acquisition, and CBZ order with one and four workers.
 They reject missing, duplicate, or unmatched selected cover evidence and invalid
 linearity values, and verify that TOC content cannot invalidate a valid cover
-landmark. Live visual validation of the Daredevil checkout remains a separate
-step.
+landmark. Live downloads and visual checks succeeded for Daredevil (2014)
+Volumes 1 and 2 under these automatic rules.
+
+### Explicit cover selection
+
+*Daredevil by Mark Waid (2011), Volume 3* (title `4455543`) supplied 166
+pre-paginated components with no linearity fields or landmarks. Its TOC has
+seven chapter entries, beginning at `pages/6.xhtml`, and no cover entry. The
+reader screenshot confirmed that page 1 displays the collection's front cover.
+This is a user confirmation; the navigation itself does not establish that
+role, so automatic selection continues to reject this metadata.
+
+For a confirmed cover, `ucd download --cover-index N` provides an explicit
+zero-based spine index. It applies only to a single Libby title in that
+invocation and is not saved as a preference or inferred for other books.
+Use `--cover-index 0` for the observed Volume 3 cover.
+
+The CLI passes the choice to `LibbyOverDriveReadAdapter`, which supplies it to
+`OverDriveReadClient.fetch_openbook()` before rendition validation.
+`ReadRendition.cover_index` then selects the cover in `component_roles()`;
+mapping and first-narrative-side selection consume those same roles. An
+explicit choice takes precedence over navigation and the selected component's
+Boolean linearity, but invalid indices, malformed linearity values, unsupported
+layouts, and ambiguous or invalid image mappings still fail normally.
+
+The chosen component becomes the separate cover. Other components preserve
+their relative spine order: omitted linearity defaults to narrative, explicit
+false remains auxiliary, and explicit true remains narrative. The raw openbook
+is unchanged. Both partial and complete captures record the supplied index in
+`interpretation.cover_index`, separate from `sources.reader` and its original
+navigation and linearity fields.
+
+Synthetic CLI tests cover index 0 and a non-first cover, byte-exact archive
+contents, raw metadata preservation, and capture provenance. Invalid CLI
+combinations fail before creating an adapter; out-of-range indices fail before
+component requests. Live export of Volume 3 succeeded with `--cover-index 0`.
+Further volumes in the same collection also needed that explicit override,
+while Volumes 6 and 7 worked with automatic cover selection.
 
 For general imports, reuse Marvel's documented pagination policy rather than
 assuming every component is a single page. This includes the 2% tolerance for
@@ -652,7 +688,8 @@ Decode as follows, matching `decode_openbook()`:
    fixed layout (`rendition-layout=pre-paginated`), valid supplied Boolean
    `linear` values, and one unambiguous cover reference under the landmark/TOC
    rules above. Omitted linearity uses the documented reading-sequence default;
-   a cover explicitly marked linear is a conflict.
+   a cover explicitly marked linear is a conflict unless explicitly selected
+   by the user through `--cover-index`.
    Reading direction comes from the explicit openbook property, not filename
    order or the direction of the decoding key.
 

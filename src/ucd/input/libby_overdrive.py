@@ -273,6 +273,7 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         mapping_progress: ProgressCallback | None = None,
         workers: int = 1,
         title_ready: Callable[[str], None] | None = None,
+        cover_index: int | None = None,
     ) -> None:
         if workers < 1:
             raise ValueError("Libby workers must be positive.")
@@ -295,6 +296,7 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         self.mapping_progress = mapping_progress
         self.workers = workers
         self.title_ready = title_ready
+        self.cover_index = cover_index
 
     def matches_url(self, url: str) -> bool:
         parts = urlsplit(url)
@@ -409,7 +411,7 @@ class LibbyOverDriveReadAdapter(InputAdapter):
         )
 
         self.status("Decoding metadata…")
-        rendition = reader.fetch_openbook(passport)
+        rendition = reader.fetch_openbook(passport, cover_index=self.cover_index)
 
         return catalog, rendition
 
@@ -538,6 +540,11 @@ class LibbyOverDriveReadAdapter(InputAdapter):
 
         if sources is not None:
             manifest["sources"] = sources
+
+        # Keep the explicit choice separate from raw reader navigation, so a
+        # later reader can distinguish user-assigned roles from source facts.
+        if self.cover_index is not None:
+            manifest["interpretation"] = {"cover_index": self.cover_index}
 
         destination = self.root / title_id / "captures" / f"{capture}.json"
         data = json.dumps(manifest, indent=2).encode()

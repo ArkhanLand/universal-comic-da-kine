@@ -149,6 +149,19 @@ their non-narrative role. RTL does not reverse spine order. Libby filenames
 use the full title when no explicit issue number is known, preventing different
 volumes of the same series from sharing a filename.
 
+If navigation does not identify the cover, first inspect the book in Libby.
+Then use `--cover-index N` to select its zero-based spine component explicitly
+(`0` selects the first component). This option accepts one Libby title per
+command and overrides automatic cover selection for that invocation only:
+
+```bash
+ucd download 4455543 --service libby-overdrive --cover-index 0 -w 16
+```
+
+The selected index must exist. Layout and image validation still apply, and
+other components retain their relative order and explicit auxiliary roles.
+The capture records the override separately from the original source metadata.
+
 If logical page numbering remains uncertain, a successful download reports
 `(Warning: logical pagination unknown) Wrote ...` on one line. The images
 are preserved in source order; detailed inference measurements are debug logs.

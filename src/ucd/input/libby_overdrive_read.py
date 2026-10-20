@@ -229,6 +229,8 @@ class ReadRendition:
 
     web_url: str = field(repr=False)
     openbook: dict[str, Any] = field(repr=False)
+    # A user selection is interpretation, not a change to the source map.
+    cover_index: int | None = None
 
     def component_roles(self) -> tuple[Literal["cover", "narrative", "nonlinear"], ...]:
         """Resolve roles for inspection, mapping, and page-side selection.
@@ -246,9 +248,19 @@ class ReadRendition:
         if any("linear" in entry and not isinstance(entry["linear"], bool) for entry in spine):
             raise ServiceResponseError("Openbook has invalid spine linearity.")
 
-        cover = _cover_index(self.openbook.get("nav"), spine)
-        if spine[cover].get("linear") is True:
-            raise ServiceResponseError("Cover navigation and spine semantics disagree.")
+        if self.cover_index is None:
+            cover = _cover_index(self.openbook.get("nav"), spine)
+            if spine[cover].get("linear") is True:
+                raise ServiceResponseError("Cover navigation and spine semantics disagree.")
+        else:
+            # Only an explicit user choice may bypass automatic cover evidence.
+            # It must still address a real fixed-layout spine component; all
+            # source linearity values above must still be valid Booleans.
+            if type(self.cover_index) is not int or not 0 <= self.cover_index < len(spine):
+                raise ServiceResponseError(
+                    f"Cover index must be between 0 and {len(spine) - 1} for this rendition."
+                )
+            cover = self.cover_index
 
         # EPUB itemrefs default to linear when the attribute is omitted.
         # Apply that same default to this reader projection, except for the
@@ -328,7 +340,9 @@ class OverDriveReadClient:
                 raise ServiceResponseError("Reader resource was not available.")
         raise ServiceResponseError("Too many redirects during reader acquisition.")
 
-    def fetch_openbook(self, passport: dict[str, Any]) -> ReadRendition:
+    def fetch_openbook(
+        self, passport: dict[str, Any], *, cover_index: int | None = None
+    ) -> ReadRendition:
         urls = passport.get("urls")
         web = urls.get("web") if isinstance(urls, dict) else None
         message = passport.get("message")
@@ -354,6 +368,6 @@ class OverDriveReadClient:
         if response.status_code != 200:
             raise ServiceResponseError("Reader page was not available after fulfillment.")
         buid = (parsed.hostname or "").split(".")[0].removeprefix("dewey-")
-        rendition = ReadRendition(web, decode_openbook(response.text, buid))
+        rendition = ReadRendition(web, decode_openbook(response.text, buid), cover_index)
         rendition.summary()  # Refuse unsupported or ambiguous structure immediately.
         return rendition
