@@ -318,8 +318,135 @@ def test_reject_bad_rendition(mutation):
     elif mutation == "missing-cover":
         book["nav"]["landmarks"] = []
     else:
-        del book["spine"][1]["linear"]
+        book["spine"][1]["linear"] = "true"
     with pytest.raises((ServiceResponseError, UnavailableError)):
+        ReadRendition(WEB, book).summary()
+
+
+def toc_book():
+    """Synthetic form of the collection with no linear fields or landmarks."""
+    book = deepcopy(BOOK)
+    for entry in book["spine"]:
+        del entry["linear"]
+    book["nav"] = {
+        "toc": [
+            {"title": "Cover", "path": "html/cover.xhtml"},
+            {"title": "Chapter One", "path": "html/page002.xhtml"},
+        ]
+    }
+    del book["i18n-page-progression-direction"]
+    return book
+
+
+def test_toc_roles():
+    book = toc_book()
+    source = deepcopy(book)
+    rendition = ReadRendition(WEB, book)
+    assert rendition.component_roles() == ("cover", "narrative"), "TOC identifies the cover"
+    assert rendition.summary() == {
+        "spine_components": 2,
+        "cover_components": 1,
+        "narrative_components": 1,
+        "nonlinear_components": 1,
+        "reading_direction": "unknown",
+    }, "Summary must count inferred roles and preserve unknown direction"
+    assert book == source, "Role interpretation must not alter source provenance"
+
+
+@pytest.mark.parametrize("reference", ["path", "original", "id", "fragment"])
+def test_toc_reference(reference):
+    book = toc_book()
+    entry = book["spine"][0]
+    if reference == "original":
+        entry["-odread-original-path"] = entry["path"]
+        entry["path"] = "delivery/cover.xhtml"
+    elif reference == "id":
+        entry["id"] = "cover-id"
+        book["nav"]["toc"][0]["path"] = "cover-id"
+    elif reference == "fragment":
+        book["nav"]["toc"][0]["path"] += "#start"
+    book["nav"]["toc"][0]["title"] = " COVER "
+    assert ReadRendition(WEB, book).component_roles() == ("cover", "narrative"), (
+        f"Cover reference must resolve via {reference}"
+    )
+
+
+def test_cover_not_first():
+    book = toc_book()
+    book["spine"].reverse()
+    assert ReadRendition(WEB, book).component_roles() == ("narrative", "cover"), (
+        "Cover selection must follow navigation rather than spine position"
+    )
+
+
+def test_linear_defaults():
+    book = deepcopy(BOOK)
+    del book["spine"][1]["linear"]
+    auxiliary = dict(book["spine"][1], path="html/notes.xhtml", linear=False)
+    book["spine"].insert(1, auxiliary)
+    rendition = ReadRendition(WEB, book)
+    assert rendition.component_roles() == ("cover", "nonlinear", "narrative"), (
+        "Omitted linearity defaults to narrative; explicit false stays auxiliary"
+    )
+    assert rendition.summary()["nonlinear_components"] == 2, (
+        "Nonlinear count must include both the cover and auxiliary component"
+    )
+
+
+@pytest.mark.parametrize("toc_kind", ["agrees", "conflicts", "duplicate", "malformed"])
+def test_landmark_precedence(toc_kind):
+    book = deepcopy(BOOK)
+    toc = [{"title": "Cover", "path": "html/cover.xhtml"}]
+    if toc_kind == "conflicts":
+        toc[0]["path"] = "html/page002.xhtml"
+    elif toc_kind == "duplicate":
+        toc.append(dict(toc[0]))
+    book["nav"]["toc"] = {} if toc_kind == "malformed" else toc
+    assert ReadRendition(WEB, book).component_roles() == ("cover", "narrative"), (
+        f"A valid landmark must remain authoritative with a {toc_kind} TOC"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "duplicate",
+        "missing",
+        "unmatched",
+        "ambiguous",
+        "linear",
+        "null-linear",
+        "integer-linear",
+        "empty-landmarks",
+        "bad-landmarks",
+        "bad-toc",
+    ],
+)
+def test_reject_toc_cover(mutation):
+    book = toc_book()
+    nav = book["nav"]
+    if mutation == "duplicate":
+        nav["toc"].append(dict(nav["toc"][0]))
+    elif mutation == "missing":
+        nav["toc"][0]["title"] = "First Page"
+    elif mutation == "unmatched":
+        nav["toc"][0]["path"] = "html/missing.xhtml"
+    elif mutation == "ambiguous":
+        book["spine"][1]["id"] = "html/cover.xhtml"
+    elif mutation == "linear":
+        book["spine"][0]["linear"] = True
+    elif mutation == "null-linear":
+        book["spine"][1]["linear"] = None
+    elif mutation == "integer-linear":
+        book["spine"][1]["linear"] = 1
+    elif mutation == "empty-landmarks":
+        nav["landmarks"] = []
+    elif mutation == "bad-landmarks":
+        nav["landmarks"] = None
+    elif mutation == "bad-toc":
+        nav["toc"] = {}
+    # Invalid selected cover evidence or linearity must fail validation.
+    with pytest.raises(ServiceResponseError):
         ReadRendition(WEB, book).summary()
 
 

@@ -243,16 +243,16 @@ def map_assets(
     workers: int = 1,
 ) -> list[Asset]:
     """Map the entire ordered spine; fetch no image bytes during this phase."""
-    rendition.summary()
+    roles = rendition.component_roles()
 
     book = rendition.openbook
     spine = book["spine"]
-    if not any(part["linear"] for part in spine):
+    if "narrative" not in roles:
         raise ServiceResponseError("Fixed-layout rendition has no narrative components.")
 
     # Establish roles and source identities before requesting documents.
-    cover = book["nav"]["landmarks"]
-    cover_target = next(item["path"] for item in cover if item.get("type") == "cover").split("#")[0]
+    # Roles also support TOC covers and omitted linearity; do not reinterpret
+    # raw landmark/linear fields independently during image mapping.
     origin = f"https://{urlsplit(rendition.web_url).hostname}"
     styles: dict[str, dict[str, str]] = {}
     keys = _component_keys(spine)
@@ -317,9 +317,7 @@ def map_assets(
             if not re.fullmatch(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+", path):
                 raise ServiceResponseError("Image has an unsupported source path.")
 
-            is_cover = cover_target in (part["path"], original, part.get("id"))
-            role = "cover" if is_cover else "narrative" if part["linear"] else "nonlinear"
-            assets.append(Asset(original, index, role, path, image_url))
+            assets.append(Asset(original, index, roles[index], path, image_url))
             # Report only a fully resolved component, including its stylesheet
             # and image association. This phase fetches documents, not images.
             if progress:

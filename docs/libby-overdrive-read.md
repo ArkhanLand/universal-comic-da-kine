@@ -73,6 +73,53 @@ printed pagination. The user confirmed that this particular manga has no
 spreads: its narrative images represent logical pages 1 through 192, each
 with a singleton `numbers` mapping, and its logical page count is 192.
 
+### Collections with TOC covers and omitted linearity
+
+A later metadata-only inspection of *Daredevil (2014), Volume 1* (OverDrive
+title `4455526`) found a different supported projection: 162 pre-paginated
+spine entries, none with a `linear` field, no `nav.landmarks`, and a flat
+`nav.toc` whose entry titled `Cover` points to `pages/1.xhtml` (spine index 0).
+The `cover.front` object supplies JPEG properties but no component reference.
+Reading direction is absent. These observations do not establish the shape
+of every Marvel collection, nor do they establish image mapping or visual
+correctness for this title.
+
+`ReadRendition.component_roles()` applies one interpretation for inspection,
+image mapping, and selection of the first narrative component's side:
+
+- If landmarks are present, require one cover landmark. Do not use a TOC
+  fallback to conceal an empty, malformed, or ambiguous landmarks list.
+  The landmark is authoritative; TOC labels are not consulted or validated
+  for cover selection, even if they disagree with the landmark.
+- If landmarks are absent, accept one top-level TOC entry whose title is
+  exactly `Cover`, ignoring case and surrounding whitespace. This is a
+  deliberately narrow observed compatibility rule, not a semantic EPUB type
+  or a general recognition rule for translated or nested cover labels.
+- Resolve the selected cover reference (without its fragment) against component
+  `path`, `-odread-original-path`, or `id`. It must match exactly one spine
+  entry. Never select a cover solely by first position or filename.
+- For other components, omitted `linear` means narrative; explicit Boolean
+  false remains auxiliary. This follows the default linear reading sequence
+  used by [EPUB itemrefs](https://www.w3.org/TR/epub-33/#sec-itemref-elem),
+  applied as an interpretation of the reader projection. A supplied non-Boolean
+  value still fails validation. A cover explicitly marked linear also fails
+  rather than silently overriding conflicting source metadata.
+
+The identified cover remains separate from narrative even if its `linear`
+field is absent. Raw metadata is not modified to manufacture `linear` fields
+or landmarks: captures retain the source fields as supplied. Roles preserve
+spine order, and every component still needs an unambiguous image association.
+Unknown reading direction stays unknown; alternating `rendition-position`
+values do not infer LTR or RTL. The first narrative component's explicit side
+can still set `first_page_side` independently of reading direction.
+
+Synthetic tests exercise the reader handshake, role interpretation, inline
+mapping, original image acquisition, and CBZ order with one and four workers.
+They reject missing, duplicate, or unmatched selected cover evidence and invalid
+linearity values, and verify that TOC content cannot invalidate a valid cover
+landmark. Live visual validation of the Daredevil checkout remains a separate
+step.
+
 For general imports, reuse Marvel's documented pagination policy rather than
 assuming every component is a single page. This includes the 2% tolerance for
 integer page-width multiples, the narrow single-page range of 94–100% at the
@@ -140,7 +187,7 @@ the narrative image had an opaque filename unrelated to the XHTML name.
 The initial Mecha-Ude-specific path check rejected this rendition before
 fetching images. The corrected mapper accepts safe relative XHTML paths and
 uses each document's single direct image reference as its association. Cover
-and narrative roles still come from landmarks and spine linearity; source
+and narrative roles use the validated navigation and spine rules above; source
 spine order remains authoritative. The existing CSS-background binding is
 retained for documents that use it.
 
@@ -602,8 +649,10 @@ Decode as follows, matching `decode_openbook()`:
    Require the outer value to be an object and its `b` member to be an object.
    That `b` object is the decoded openbook/BIF map.
 5. Validate the rendition before interpreting it: a nonempty spine, supported
-   fixed layout (`rendition-layout=pre-paginated`), explicit boolean `linear`
-   values, and one unambiguous cover landmark matching a non-linear component.
+   fixed layout (`rendition-layout=pre-paginated`), valid supplied Boolean
+   `linear` values, and one unambiguous cover reference under the landmark/TOC
+   rules above. Omitted linearity uses the documented reading-sequence default;
+   a cover explicitly marked linear is a conflict.
    Reading direction comes from the explicit openbook property, not filename
    order or the direction of the decoding key.
 
@@ -887,7 +936,7 @@ where they overlap so disagreements can be inspected rather than erased.
 | Age rating | Thunder `ratings.maturityLevel.name`, when applicable |
 | Reading direction | Explicit BIF `i18n-page-progression-direction` |
 | First narrative side | Explicit rendition position if established; otherwise unknown |
-| Cover / narrative membership | BIF landmarks and spine `linear` semantics |
+| Cover / narrative membership | BIF landmark/TOC cover and spine `linear` defaults |
 | Reading order / navigation | BIF spine order / BIF nav respectively |
 | Image objects | Exact read-host image response bodies |
 

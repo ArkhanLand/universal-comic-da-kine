@@ -341,7 +341,10 @@ class LibbyOverDriveReadAdapter(InputAdapter):
 
         # 4. Apply the shared pagination policy and explicit reader direction.
         inferred = _infer_page_numbers(pages)
-        first = next(part for part in rendition.openbook["spine"] if part["linear"])
+        # Mapping has already resolved roles, including omitted linearity.
+        # Use the first narrative component's explicit side, not the cover's.
+        first_asset = next(asset for asset in assets if asset.role == "narrative")
+        first = rendition.openbook["spine"][first_asset.index]
         side = first.get("rendition-position")
         first_side: Literal["left", "right"] | None = side if side in {"left", "right"} else None
 
