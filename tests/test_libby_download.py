@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from copy import deepcopy
 from io import BytesIO
 from threading import Barrier, Event
@@ -100,7 +101,7 @@ class Server:
             200, content=self.images[name], headers={"Content-Type": "image/jpeg"}
         )
 
-    def adapter(self, tmp_path, monkeypatch):
+    def adapter(self, tmp_path, monkeypatch, *, cover_index=None):
         monkeypatch.setattr(
             LibbyClient,
             "open_loan",
@@ -112,6 +113,7 @@ class Server:
             api_client=httpx.Client(transport=httpx.MockTransport(self.handle)),
             read_client=httpx.Client(transport=httpx.MockTransport(self.handle)),
             cache_dir=tmp_path,
+            cover_index=cover_index,
         )
 
 
@@ -620,6 +622,101 @@ def test_toc_collection(tmp_path, monkeypatch, workers):
         assert archive.read("00002.jpg") == server.images["a.jpg"], (
             "CBZ must preserve spine order rather than sorting source filenames"
         )
+
+
+@pytest.mark.parametrize("cover_index", [0, 1])
+def test_cli_cover_override(tmp_path, monkeypatch, cover_index):
+    server = InlineServer()
+    for part in server.book["spine"]:
+        part.pop("linear")
+        part["rendition-position"] = "right"
+    # No metadata identifies the cover, as in the observed Volume 3 TOC.
+    server.book["nav"] = {
+        "toc": [{"title": "Chapter One", "path": server.book["spine"][2]["path"]}]
+    }
+    source = deepcopy(server.book)
+
+    def factory(**kwargs):
+        return server.adapter(tmp_path / "cache", monkeypatch, cover_index=kwargs["cover_index"])
+
+    monkeypatch.setattr("ucd.cli.LibbyOverDriveReadAdapter", factory)
+    output = tmp_path / "output"
+    result = CliRunner().invoke(
+        app,
+        [
+            "download",
+            "123" if cover_index == 0 else "https://share.libbyapp.com/title/123",
+            "--service",
+            "libby-overdrive",
+            "--cover-index",
+            str(cover_index),
+            "--output-dir",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, f"Explicit cover selection must permit export: {result.output}"
+    originals = [server.images[name] for name in ("cover.jpg", "z.jpg", "a.jpg")]
+    expected = [originals[cover_index]] + [
+        image for index, image in enumerate(originals) if index != cover_index
+    ]
+    with ZipFile(next(output.glob("*.cbz"))) as archive:
+        assert [archive.read(f"{index:05}.jpg") for index in range(3)] == expected, (
+            "Export must separate the chosen cover and preserve remaining image order and bytes"
+        )
+    capture = json.loads(
+        next(tmp_path.glob("cache/libby-overdrive/123/captures/*.json")).read_text()
+    )
+    assert capture["interpretation"] == {"cover_index": cover_index}, (
+        "Capture must retain the user selection as interpretation"
+    )
+    retained = capture["sources"]["reader"]
+    assert retained["nav"] == source["nav"], "Capture must retain the original chapter-only TOC"
+    assert all("linear" not in part for part in retained["spine"]), (
+        "An explicit choice must not insert inferred linearity into source metadata"
+    )
+    assert server.book == source, "Cover selection must leave the source map unchanged"
+
+
+def test_override_out_of_range(tmp_path, monkeypatch):
+    server = Server()
+    adapter = server.adapter(tmp_path, monkeypatch, cover_index=3)
+    # Reject a nonexistent component before mapping or downloading images.
+    with pytest.raises(ServiceResponseError, match="Cover index"):
+        adapter.get_publication("123")
+    assert all(request.url.path == "/" for request in server.calls), (
+        "Invalid cover indices must stop at metadata validation"
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["123", "--cover-index", "0"],
+        ["123", "--service", "marvel-unlimited", "--cover-index", "0"],
+        ["123", "456", "--service", "libby-overdrive", "--cover-index", "0"],
+        ["123", "--service", "libby-overdrive", "--cover-index", "-1"],
+    ],
+    ids=["bare-id", "wrong-service", "batch", "negative"],
+)
+def test_cli_cover_rejection(tmp_path, monkeypatch, arguments):
+    def forbidden(**kwargs):
+        pytest.fail("Invalid cover-option usage must not construct an adapter")
+
+    monkeypatch.setattr("ucd.cli.LibbyOverDriveReadAdapter", forbidden)
+    monkeypatch.setattr("ucd.cli.MarvelUnlimitedAdapter", forbidden)
+    # Rich can insert color codes inside option names on CI. Exercise that
+    # output too, but assert against its visible text rather than its styling.
+    result = CliRunner().invoke(
+        app,
+        ["download", *arguments, "--output-dir", str(tmp_path)],
+        env={"FORCE_COLOR": "1"},
+        color=True,
+    )
+    assert result.exit_code == 2, "Invalid cover-option usage must be a CLI parameter error"
+    plain_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "cover-index" in plain_output, (
+        "Parameter errors must identify the cover option regardless of terminal styling"
+    )
 
 
 def test_landmark_download(tmp_path, monkeypatch):

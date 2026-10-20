@@ -379,6 +379,50 @@ def test_cover_not_first():
     )
 
 
+@pytest.mark.parametrize("index", [0, 1])
+def test_cover_override(index):
+    book = toc_book()
+    book["nav"]["toc"] = [{"title": "Chapter One", "path": "html/page002.xhtml"}]
+    source = deepcopy(book)
+    rendition = ReadRendition(WEB, book, cover_index=index)
+    expected = ("cover", "narrative") if index == 0 else ("narrative", "cover")
+    assert rendition.component_roles() == expected, (
+        "Explicit choice must determine cover membership"
+    )
+    assert book == source, "An override must not manufacture source navigation or linearity"
+    # Omitting the override must retain automatic validation for this book.
+    with pytest.raises(ServiceResponseError):
+        ReadRendition(WEB, book).summary()
+
+
+def test_override_precedence():
+    book = deepcopy(BOOK)
+    book["spine"][0]["linear"] = True
+    rendition = ReadRendition(WEB, book, cover_index=1)
+    assert rendition.component_roles() == ("narrative", "cover"), (
+        "Explicit choice must take precedence over navigation and selected cover linearity"
+    )
+
+
+@pytest.mark.parametrize("index", [-1, 2, True, 0.5], ids=["negative", "range", "bool", "float"])
+def test_invalid_cover_index(index):
+    # Python callers must not wrap negative indices or coerce invalid types.
+    with pytest.raises(ServiceResponseError, match="Cover index"):
+        ReadRendition(WEB, toc_book(), cover_index=index).summary()
+
+
+@pytest.mark.parametrize("mutation", ["layout", "linearity"])
+def test_override_keeps_checks(mutation):
+    book = toc_book()
+    if mutation == "layout":
+        book["spine"][1]["rendition-layout"] = "reflowable"
+    else:
+        book["spine"][1]["linear"] = "true"
+    # Selecting a cover cannot bypass validation of the component metadata.
+    with pytest.raises((ServiceResponseError, UnavailableError)):
+        ReadRendition(WEB, book, cover_index=0).summary()
+
+
 def test_linear_defaults():
     book = deepcopy(BOOK)
     del book["spine"][1]["linear"]
