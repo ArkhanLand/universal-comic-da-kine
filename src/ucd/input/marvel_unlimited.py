@@ -2,6 +2,7 @@ import hashlib
 import json
 import mimetypes
 import re
+from collections import Counter
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
@@ -239,22 +240,29 @@ class MarvelUnlimitedAdapter(InputAdapter):
                 raise ServiceResponseError("Marvel response contained invalid page asset data")
             # Observed stable across repeated manifests despite URL rotation.
             # Missing IDs fall back to URL-specific reuse, never sequence IDs.
-            identifiers = [str(page["id"]) for page in pages if page.get("id") is not None]
-            if len(set(identifiers)) != len(identifiers):
-                raise ServiceResponseError("Marvel response contained duplicate page IDs")
+            identifiers = Counter(str(page["id"]) for page in pages if page.get("id") is not None)
+
+            def unique_asset_id(page: dict[str, Any]) -> str | None:
+                identifier = str(page["id"]) if page.get("id") is not None else None
+                # Repeated IDs cannot safely identify cached images. Preserve
+                # every manifest entry and use URL-specific reuse for these.
+                return (
+                    identifier if identifier is not None and identifiers[identifier] == 1 else None
+                )
+
             # The first asset is treated as the cover. Asset sequence alone does
             # not establish logical pagination: an image may contain a spread.
             return _MarvelPageSources(
                 cover=_MarvelPageSource(
                     numbers=(),
                     url=pages[0]["assets"]["source"],
-                    asset_id=str(pages[0]["id"]) if pages[0].get("id") is not None else None,
+                    asset_id=unique_asset_id(pages[0]),
                 ),
                 pages=list(
                     _MarvelPageSource(
                         numbers=None,
                         url=page["assets"]["source"],
-                        asset_id=str(page["id"]) if page.get("id") is not None else None,
+                        asset_id=unique_asset_id(page),
                     )
                     for page in pages[1:]
                 ),
