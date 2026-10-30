@@ -12,7 +12,6 @@ from typer.testing import CliRunner
 
 from tests.helpers import make_test_publication
 from ucd.cli import app
-from ucd.exceptions import ServiceResponseError
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 from ucd.metadata import prepare_comic_metadata
 from ucd.output.cbz import write_cbz
@@ -240,9 +239,40 @@ def test_missing_ids(tmp_path):
 def test_duplicate_ids(tmp_path):
     server = MarvelServer()
     server.order = ["cover", "one", "one"]
-    with pytest.raises(ServiceResponseError, match="duplicate page IDs"):
-        acquire(server.adapter(tmp_path))
-    assert not server.downloads
+    result = acquire(server.adapter(tmp_path))
+    assert len(result.pages) == 2
+    assert result.pages[0].path == result.pages[1].path
+    assert server.downloads == ["cover", "one", "one"]
+
+
+def test_duplicate_ids_with_different_images(tmp_path):
+    server = MarvelServer()
+    acquire(server.adapter(tmp_path))
+
+    def handle(request):
+        response = server.handle(request)
+        if "/assets/" in request.url.path:
+            data = response.json()
+            for page in data["data"]["results"][0]["pages"]:
+                page["id"] = "one"
+            return httpx.Response(200, json=data)
+        return response
+
+    adapter = MarvelUnlimitedAdapter(
+        client=httpx.Client(transport=httpx.MockTransport(handle)), cache_dir=tmp_path
+    )
+    result = acquire(adapter)
+    assert result.cover.path.read_bytes() == server.images["cover"]
+    assert [page.path.read_bytes() for page in result.pages] == [
+        server.images["one"],
+        server.images["two"],
+    ]
+    downloads = list(server.downloads)
+    acquire(adapter)
+    assert server.downloads == downloads
+    server.generation += 1
+    acquire(adapter)
+    assert server.downloads == downloads + ["cover", "one", "two"]
 
 
 def test_refresh_overwrite(tmp_path, monkeypatch):
