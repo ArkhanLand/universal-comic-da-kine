@@ -194,7 +194,17 @@ components without element IDs. The CSS-background path uses a restricted
 parser accepting plain ID selectors and single background URLs. Ambiguous
 mappings and conditional page-image rules fail explicitly; it does not
 implement a browser cascade. The component body decoder accepts the observed
-`__bif_cfc1` string transformation without executing JavaScript.
+`__bif_cfc0` (base64), `__bif_cfc1` (four-character swap), and
+`__bif_cfc3` (printable-ASCII shift using the first `-odread-kdigits`
+openbook entry) transformations without executing JavaScript. Unknown
+encodings, missing cfc3 keys, and malformed envelopes fail explicitly.
+
+On November 3, 2026, live inspection of One Piece Volume 4 (3053974)
+found cfc3 component bodies containing single inline JPEGs. The old cfc1-only
+parser left those bodies undecoded and incorrectly reported a missing page
+element. The synthetic fixtures had covered cfc1 and clear inline markup,
+but had no cfc3 coverage. This failure occurs before image acquisition and
+is independent of worker count.
 
 Libby and Marvel share the existing measured pagination heuristic. Explicit
 reading direction and first-page position come from reader metadata; unknown
