@@ -29,7 +29,7 @@ from PIL import Image, UnidentifiedImageError
 
 from ucd.download.parallel import fetch_ordered
 from ucd.exceptions import ServiceResponseError
-from ucd.input.libby_overdrive_read import OverDriveReadClient, ReadRendition, _js_string
+from ucd.input.libby_overdrive_read import _STRING, OverDriveReadClient, ReadRendition, _js_string
 from ucd.models import DownloadedImageFile
 
 
@@ -70,24 +70,57 @@ class ComponentHTML(HTMLParser):
             self.base = href
 
 
-def component_html(html: str) -> ComponentHTML:
-    """Read clear head markup and the observed obfuscated body without JS."""
+def component_html(html: str, kdigits: Any = None) -> ComponentHTML:
+    """Decode known component envelopes as data, never executing reader JS.
+
+    cfc0 is base64, cfc1 swaps four-character groups, and cfc3 applies
+    the reader's printable-ASCII shift using the openbook's kdigits key.
+    """
     parsed = ComponentHTML()
     parsed.feed(html)
-
-    match = re.search(r"parent\.__bif_cfc1\(\s*self\s*,\s*(['\"])(.*?)\1\s*\)", html, re.S)
-
-    if match:
-        # libby-archiver's read.mjs: swap first/fourth in each four-char
-        # group, then decode base64 and UTF-8. Never execute component JS.
-        try:
-            blob = _js_string(match[1] + match[2] + match[1])
-            shuffled = re.sub(r"(.)(.)(.)(.)", r"\4\2\3\1", blob)
-            decoded = base64.b64decode(shuffled, validate=True).decode("utf-8")
-            parsed.feed(decoded)
-        except (ValueError, UnicodeError):
-            raise ServiceResponseError("Cannot decode fixed-layout component markup.") from None
-
+    calls = list(re.finditer(r"parent\.__bif_cfc(\d+)\s*\(", html))
+    if not calls:
+        return parsed
+    if len(calls) != 1:
+        raise ServiceResponseError("Component has multiple encoded bodies.")
+    call = calls[0]
+    version = call[1]
+    if version not in {"0", "1", "3"}:
+        raise ServiceResponseError("Unsupported fixed-layout component encoding.")
+    try:
+        tail = html[call.end() :]
+        argument = re.match(r"\s*self\s*,\s*", tail)
+        if argument is None:
+            raise ValueError
+        literal = _STRING.match(tail, argument.end())
+        if literal is None or not re.match(r"\s*\)", tail[literal.end() :]):
+            raise ValueError
+        blob = _js_string(literal.group())
+        if version == "1":
+            blob = re.sub(r"(.)(.)(.)(.)", r"\4\2\3\1", blob)
+        elif version == "3":
+            if (
+                not isinstance(kdigits, list)
+                or not kdigits
+                or not isinstance(kdigits[0], str)
+                or not re.fullmatch(r"[0-9]+", kdigits[0])
+            ):
+                raise ServiceResponseError("Component encoding requires a valid reader key.")
+            key = kdigits[0]
+            output = []
+            for index, char in enumerate(blob):
+                code = ord(char)
+                digit = int(key[index % len(key)])
+                if digit:
+                    code += (index + digit) % 94
+                    if code > 126:
+                        code = code % 126 + 32
+                output.append(chr(code))
+            blob = "".join(output)
+        decoded = base64.b64decode(blob, validate=True).decode("utf-8")
+        parsed.feed(decoded)
+    except (ValueError, UnicodeError):
+        raise ServiceResponseError("Cannot decode fixed-layout component markup.") from None
     return parsed
 
 
@@ -232,7 +265,7 @@ def _load_component(
         url += "?" + params[position]
 
     response = reader.resource(url, origin)
-    document = component_html(response.text)
+    document = component_html(response.text, rendition.openbook.get("-odread-kdigits"))
     return document, url
 
 

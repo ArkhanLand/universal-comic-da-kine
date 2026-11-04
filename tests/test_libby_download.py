@@ -828,3 +828,87 @@ def test_mixed_mapping(tmp_path, monkeypatch):
     with pytest.raises(ServiceResponseError, match="mixes"):
         server.adapter(tmp_path, monkeypatch).get_publication("123")
     assert not any(r.url.path.endswith(".jpg") for r in server.calls)
+
+
+# Fixed synthetic cfc3 sample: printable-ASCII shift, key 50721, UTF-8 body.
+CFC3_BODY = "KGAqU>k{F=CpQZ3\\Z,zUJG)UA6AU/K&+.nIMdy@D7G;=z{a`?W.U:C@:Ze0Tmj25v'9!}lG="
+
+
+def test_component_cfc3():
+    parsed = component_html(
+        "<script>parent.__bif_cfc3(self, " + json.dumps(CFC3_BODY) + ")</script>",
+        ["50721"],
+    )
+    assert parsed.ids == {"page002"}
+
+
+@pytest.mark.parametrize("key", [None, [], [""], [123], ["secret"]])
+def test_component_cfc3_key(key):
+    with pytest.raises(ServiceResponseError, match="valid reader key"):
+        component_html('<script>parent.__bif_cfc3(self, "AAAA")</script>', key)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        '__bif_cfc7(self, "AAAA")',
+        "__bif_cfc3(self, compute())",
+        '__bif_cfc1(self, "bad\\q")',
+        '__bif_cfc1(self, "!!!!")',
+        '__bif_cfc3(self, "AAAA", extra)',
+    ],
+)
+def test_component_encoding_rejected(call):
+    with pytest.raises(ServiceResponseError, match="encoding|decode"):
+        component_html("<script>parent." + call + "</script>", ["50721"])
+
+
+@pytest.mark.parametrize("workers", [1, 16])
+@pytest.mark.parametrize("server_type", [Server, InlineServer], ids=["background", "inline"])
+def test_cfc3_mapping(tmp_path, monkeypatch, workers, server_type):
+    import base64
+
+    server = server_type()
+    server.book["-odread-kdigits"] = ["50721"]
+    handler = server.handle
+
+    def encoded(request):
+        response = handler(request)
+        if request.url.path.endswith(".xhtml"):
+            plain = base64.b64encode(response.text.encode()).decode()
+            cipher = []
+            for index, char in enumerate(plain):
+                digit = int("50721"[index % 5])
+                code = ord(char)
+                if digit:
+                    code = 33 + (code - 33 - (index + digit) % 94) % 94
+                cipher.append(chr(code))
+            return httpx.Response(
+                200,
+                text="<script>parent.__bif_cfc3(self, "
+                + json.dumps("".join(cipher))
+                + ")</script>",
+            )
+        return response
+
+    server.handle = encoded
+    adapter = server.adapter(tmp_path, monkeypatch)
+    adapter.workers = workers
+    result = adapter.get_publication("123")
+    assert result.cover.path.read_bytes() == server.images["cover.jpg"]
+    assert [page.path.read_bytes() for page in result.narrative] == [
+        server.images["z.jpg"],
+        server.images["a.jpg"],
+    ]
+
+
+def test_component_cfc0():
+    parsed = component_html(
+        '<script>parent.__bif_cfc0(self, "PGRpdiBpZD0icGFnZTAwMiI+PC9kaXY+")</script>'
+    )
+    assert parsed.ids == {"page002"}
+
+
+def test_component_multiple_bodies():
+    with pytest.raises(ServiceResponseError, match="multiple encoded bodies"):
+        component_html('parent.__bif_cfc0(self, "AAAA");parent.__bif_cfc1(self, "AAAA")')
