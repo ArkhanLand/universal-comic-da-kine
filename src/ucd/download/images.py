@@ -61,13 +61,22 @@ class ImageCache:
         asset_id = hashlib.sha256(key.encode()).hexdigest()
         return self._lookup(asset_id, key)
 
+    def acquisition_path(self, key: str) -> Path:
+        """Return the receipt referenced by the asset's current cache pointer."""
+        asset_id = hashlib.sha256(key.encode()).hexdigest()
+        path, _ = self._read_acquisition(asset_id)
+        return path
+
+    def _read_acquisition(self, asset_id: str) -> tuple[Path, bytes]:
+        _, pointer = _read_entry(self.root, "assets", asset_id)
+        record_id = pointer.decode().strip()
+        if re.fullmatch(r"[0-9a-f]{32}", record_id) is None:
+            raise ValueError("Invalid cache acquisition ID")
+        return _read_entry(self.root, "acquisitions", record_id, ".json")
+
     def _lookup(self, asset_id: str, key: str) -> DownloadedImageFile | None:
         try:
-            _, pointer = _read_entry(self.root, "assets", asset_id)
-            record_id = pointer.decode().strip()
-            if re.fullmatch(r"[0-9a-f]{32}", record_id) is None:
-                return None
-            _, record_data = _read_entry(self.root, "acquisitions", record_id, ".json")
+            _, record_data = self._read_acquisition(asset_id)
             record = json.loads(record_data)
             if record["schema_version"] != 1 or record["key"] != key:
                 return None

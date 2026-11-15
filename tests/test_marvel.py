@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -6,7 +7,10 @@ from typing import Any
 import httpx
 import pytest
 from PIL import Image
+from typer.testing import CliRunner
 
+from tests.helpers import make_test_publication
+from ucd.cli import app
 from ucd.exceptions import (
     IneligibleError,
     InvalidComicInputError,
@@ -567,3 +571,48 @@ def test_explicit_mappings(tmp_path, monkeypatch):
     for i, page in enumerate(pages.pages, start=1):
         assert len(page.path.stem) == 64  # Content hash, independent of source order.
         assert page.path.read_bytes() == image_data[f"https://example.com/{i}"]
+
+
+def test_download_disambiguates_marvel_issue_zero(tmp_path, monkeypatch):
+    publication = replace(
+        make_test_publication(tmp_path), title="Example", series="Example", issue_number="0"
+    )
+    acquired = []
+
+    def get_publication(self, source, progress, metadata_ready):
+        metadata_ready(publication.title, publication.series, publication.issue_number)
+        acquired.append(self.get_catalog_id(source))
+        return publication
+
+    monkeypatch.setattr(MarvelUnlimitedAdapter, "__init__", lambda self, **kwargs: None)
+    monkeypatch.setattr(MarvelUnlimitedAdapter, "get_publication", get_publication)
+    output = tmp_path / "output"
+    output.mkdir()
+    legacy = output / "Example #0.cbz"
+    legacy.write_bytes(b"existing")
+    args = [
+        "download",
+        "62580",
+        "https://www.marvel.com/comics/issue/62610/example",
+        "--issue-delay",
+        "0",
+        "--output-dir",
+        str(output),
+    ]
+    runner = CliRunner()
+
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert acquired == ["62580", "62610"]
+    assert sorted(path.name for path in output.iterdir()) == [
+        "Example #0 [Marvel 62580].cbz",
+        "Example #0 [Marvel 62610].cbz",
+        "Example #0.cbz",
+    ]
+    assert legacy.read_bytes() == b"existing"
+
+    acquired.clear()
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Skipped existing output:") == 2
+    assert acquired == []

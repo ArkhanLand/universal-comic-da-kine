@@ -4,7 +4,12 @@ from typer.testing import CliRunner
 
 from tests.helpers import make_test_publication
 from ucd.cli import app
-from ucd.exceptions import ComicDownloaderError, UnavailableError
+from ucd.exceptions import (
+    ComicDownloaderError,
+    IneligibleError,
+    ServiceResponseError,
+    UnavailableError,
+)
 from ucd.input.marvel_unlimited import MarvelUnlimitedAdapter
 from ucd.metadata import prepare_comic_metadata
 
@@ -62,6 +67,30 @@ def test_bifrost_status(method, endpoint, status):
             with pytest.raises(httpx.HTTPStatusError) as exc:
                 getattr(adapter, method)("51975")
             assert exc.value.response.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("subscriber", "pages", "error", "message"),
+    [
+        (True, [], UnavailableError, "Marvel digital ID 52942: Marvel returned no page assets"),
+        (False, [], IneligibleError, "Marvel Unlimited subscription required"),
+        (True, {}, ServiceResponseError, "invalid page asset data"),
+    ],
+    ids=["unavailable", "ineligible", "malformed"],
+)
+def test_bifrost_empty_assets(subscriber, pages, error, message):
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "data": {"results": [{"auth_state": {"subscriber": subscriber}, "pages": pages}]}
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        adapter = MarvelUnlimitedAdapter(client=client)
+        with pytest.raises(error, match=message):
+            adapter.get_page_sources("52942")
 
 
 def test_catalog_404():

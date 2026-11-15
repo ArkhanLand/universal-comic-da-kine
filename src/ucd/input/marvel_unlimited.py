@@ -235,6 +235,12 @@ class MarvelUnlimitedAdapter(InputAdapter):
         if not subscriber:
             raise IneligibleError("Marvel Unlimited subscription required")
 
+        if isinstance(pages, list) and not pages:
+            raise UnavailableError(
+                f"No downloadable digital edition is available for Marvel digital ID {digital_id}: "
+                "Marvel returned no page assets"
+            )
+
         try:
             if not isinstance(pages, list) or not all(isinstance(page, dict) for page in pages):
                 raise ServiceResponseError("Marvel response contained invalid page asset data")
