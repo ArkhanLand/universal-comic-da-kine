@@ -3,6 +3,11 @@ import sys
 from pathlib import Path
 
 
+def sharded_path(root: Path, category: str, identifier: str, suffix: str = "") -> Path:
+    """Build a cache path from a hexadecimal digest or acquisition ID."""
+    return root / "shards" / category / identifier[:1] / identifier[1:3] / f"{identifier}{suffix}"
+
+
 class Cache:
     def __init__(self, root: Path) -> None:
         self.root = root

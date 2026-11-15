@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from threading import Barrier, Event
 from zipfile import ZipFile
 
@@ -71,8 +72,83 @@ def acquire(adapter, digital_id="39895", progress=None):
     return adapter.get_pages(digital_id, adapter.get_page_sources(digital_id), progress=progress)
 
 
+def record_paths(root):
+    return (root / "shards" / "acquisitions").glob("*/*/*.json")
+
+
 def records(root):
-    return [json.loads(p.read_text()) for p in (root / "acquisitions").glob("*.json")]
+    return [json.loads(p.read_text()) for p in sorted(record_paths(root))]
+
+
+def test_sharded_layout(tmp_path):
+    result = acquire(MarvelServer().adapter(tmp_path))
+    shards = tmp_path / "shards"
+    objects = [result.cover.path, *(page.path for page in result.pages)]
+    for directory, paths in [
+        ("objects", objects),
+        ("assets", list((shards / "assets").glob("*/*/*"))),
+        ("acquisitions", list(record_paths(tmp_path))),
+    ]:
+        assert len(paths) == 3
+        for path in paths:
+            assert path == shards / directory / path.stem[:1] / path.stem[1:3] / path.name
+        assert not (tmp_path / directory).exists()
+
+
+@pytest.mark.parametrize(
+    "legacy_directories",
+    [
+        ("assets",),
+        ("acquisitions",),
+        ("objects",),
+        ("assets", "acquisitions", "objects"),
+    ],
+)
+@pytest.mark.parametrize("layout", ["flat", "nested"])
+def test_reuse_legacy_cache(tmp_path, monkeypatch, legacy_directories, layout):
+    server = MarvelServer()
+    acquire(server.adapter(tmp_path))
+    legacy = {}
+    for directory in legacy_directories:
+        root = tmp_path / directory
+        sharded_root = tmp_path / "shards" / directory
+        for path in sharded_root.glob("*/*/*"):
+            name = path.name if layout == "flat" else path.relative_to(sharded_root)
+            destination = root / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            path.rename(destination)
+            legacy[destination] = destination.read_bytes()
+    assert len(legacy) == 3 * len(legacy_directories)
+
+    def fail_on_scan(*args, **kwargs):
+        pytest.fail("Cache lookup enumerated a directory")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "glob", fail_on_scan)
+        patch.setattr(Path, "iterdir", fail_on_scan)
+        result = acquire(server.adapter(tmp_path))
+    assert server.downloads == ["cover", "one", "two"]
+    assert result.pages[0].path.read_bytes() == server.images["one"]
+    assert {path: path.read_bytes() for path in legacy} == legacy
+
+
+def test_refresh_supersedes_flat_pointer(tmp_path):
+    server = MarvelServer()
+    server.order = ["cover", "one"]
+    acquire(server.adapter(tmp_path))
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    flat_pointers = {}
+    for path in (tmp_path / "shards" / "assets").glob("*/*/*"):
+        flat_path = path.rename(assets / path.name)
+        flat_pointers[flat_path] = flat_path.read_bytes()
+    server.images["one"] = image_bytes("purple")
+    refreshed = acquire(server.adapter(tmp_path, refresh=True))
+
+    assert refreshed.pages[0].path.read_bytes() == server.images["one"]
+    assert acquire(server.adapter(tmp_path)) == refreshed
+    assert server.downloads == ["cover", "one", "cover", "one"]
+    assert {path: path.read_bytes() for path in flat_pointers} == flat_pointers
 
 
 def test_parallel_order(tmp_path):
@@ -197,7 +273,7 @@ def test_recover_cache(tmp_path, damage):
     elif damage == "corrupt":
         target.write_bytes(b"broken")
     else:
-        for path in (tmp_path / "acquisitions").glob("*.json"):
+        for path in record_paths(tmp_path):
             if json.loads(path.read_text())["sha256"] == target.stem:
                 path.write_text("invalid json")
     recovered = acquire(server.adapter(tmp_path))

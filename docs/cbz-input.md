@@ -113,8 +113,11 @@ the fuller original XML. Ampersand-separated creator parsing remains issue
 ## Source retention and library use
 
 Original archives and images are retained under
-`~/.local/share/ucd/cbz/objects`, addressed by SHA-256 with a convenience
-extension. Records under `sources` map full original member names to hashes.
+`~/.local/share/ucd/cbz/shards/objects`, addressed by SHA-256 with a convenience
+extension. Records under `shards/sources` map full original member names to hashes.
+Both directories shard new entries using the first three hex digits of the
+hash, for example `shards/objects/a/bc/abc….cbz`. Earlier files stay at their
+original paths.
 Member names are provenance, never filesystem extraction destinations.
 
 ```python

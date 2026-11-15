@@ -14,6 +14,7 @@ from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from PIL import Image
 
+from ucd.download.cache import sharded_path
 from ucd.download.images import _atomic_write
 from ucd.exceptions import InvalidComicInputError
 from ucd.input.base import InputAdapter, MetadataCallback, ProgressCallback
@@ -319,7 +320,8 @@ class CBZInputAdapter(InputAdapter):
                 progress(title, 0, len(images))
             # Retain the exact container, including unsupported/unknown
             # metadata.
-            _atomic_write(self.cache_dir / "objects" / f"{digest}.cbz", original)
+            source_object = sharded_path(self.cache_dir, "objects", digest, ".cbz")
+            _atomic_write(source_object, original)
             for index, entry in enumerate(images):
                 data = archive.read(entry)
                 with Image.open(BytesIO(data)) as image:
@@ -332,7 +334,7 @@ class CBZInputAdapter(InputAdapter):
                     mode = image.mode
                     image.verify()
                 object_id = hashlib.sha256(data).hexdigest()
-                object_path = self.cache_dir / "objects" / f"{object_id}{extension}"
+                object_path = sharded_path(self.cache_dir, "objects", object_id, extension)
                 _atomic_write(object_path, data)
                 numbers: tuple[int, ...] | None = None
                 if index == cover_index:
@@ -360,7 +362,7 @@ class CBZInputAdapter(InputAdapter):
                 ],
             }
             _atomic_write(
-                self.cache_dir / "sources" / f"{digest}.json",
+                sharded_path(self.cache_dir, "sources", digest, ".json"),
                 (json.dumps(record, indent=2) + "\n").encode(),
             )
             publication = Publication(
@@ -375,7 +377,7 @@ class CBZInputAdapter(InputAdapter):
                 publication,
                 source_representation=SourceRepresentation(
                     media_type="application/vnd.comicbook+zip",
-                    path=self.cache_dir / "objects" / f"{digest}.cbz",
+                    path=source_object,
                     sha256=digest,
                     normalized=publication,
                     assets=tuple((page.path, page.path.stem) for page in pages),

@@ -200,6 +200,11 @@ and reused by digital issue ID, page ID, and source rendition, even when
 delivery URLs change. Metadata and the page manifest are fetched on each
 import. Cached bytes are checked against their SHA-256 hash before reuse.
 
+New image objects, asset pointers, and acquisition records are stored under
+`shards/`, for example `shards/objects/a/bc/abc….png`. Earlier entries remain
+readable by direct lookup at their original paths, including flat files and
+prefix directories under `objects/`, `assets/`, and `acquisitions/`.
+
 Use `ucd download SOURCE --refresh` to fetch fresh images. Add `--overwrite`
 if the destination CBZ already exists; `--overwrite` alone still reuses cached
 images. Refresh is needed for replacements or rendition changes that retain

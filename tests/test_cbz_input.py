@@ -72,8 +72,17 @@ def test_xml_adds_comment(tmp_path, cbz_cache):
         assert ET.fromstring(new.read("ComicInfo.xml")).findtext("Series") == "Example"
     assert source.read_bytes() == original
     digest = hashlib.sha256(original).hexdigest()
-    assert (cbz_cache / "objects" / f"{digest}.cbz").read_bytes() == original
-    record = json.loads((cbz_cache / "sources" / f"{digest}.json").read_text())
+    shards = cbz_cache / "shards"
+    source_object = shards / "objects" / digest[:1] / digest[1:3] / f"{digest}.cbz"
+    assert publication.source_representation is not None
+    assert publication.source_representation.path == source_object
+    assert source_object.read_bytes() == original
+    for page in (publication.cover, *publication.narrative):
+        object_id = hashlib.sha256(page.path.read_bytes()).hexdigest()
+        assert page.path == shards / "objects" / object_id[:1] / object_id[1:3] / page.path.name
+        assert page.path.stem == object_id
+    record_path = shards / "sources" / digest[:1] / digest[1:3] / f"{digest}.json"
+    record = json.loads(record_path.read_text())
     assert [item["name"] for item in record["images"]] == ["01.png", "02.png"]
     reread = CBZInputAdapter().get_publication(str(destination))
     assert reread.creators == publication.creators

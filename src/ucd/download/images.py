@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -14,6 +15,7 @@ from uuid import uuid4
 
 from PIL import Image
 
+from ucd.download.cache import sharded_path
 from ucd.models import DownloadedImageFile
 
 
@@ -30,6 +32,19 @@ def _atomic_write(path: Path, data: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _read_entry(root: Path, category: str, identifier: str, suffix: str = "") -> tuple[Path, bytes]:
+    path = sharded_path(root, category, identifier, suffix)
+    # The first sharded layout nested its prefixes inside the flat directories.
+    nested_path = root / path.relative_to(root / "shards")
+    for candidate in (path, nested_path):
+        try:
+            return candidate, candidate.read_bytes()
+        except FileNotFoundError:
+            continue
+    flat_path = root / category / path.name
+    return flat_path, flat_path.read_bytes()
+
+
 class ImageCache:
     """Map provider asset identities to verified, content-addressed originals.
 
@@ -43,15 +58,17 @@ class ImageCache:
 
     def lookup(self, key: str) -> DownloadedImageFile | None:
         """Verify a reusable original without changing any cache state."""
-        pointer = self.root / "assets" / hashlib.sha256(key.encode()).hexdigest()
-        return self._lookup(pointer, key)
+        asset_id = hashlib.sha256(key.encode()).hexdigest()
+        return self._lookup(asset_id, key)
 
-    def _lookup(self, pointer: Path, key: str) -> DownloadedImageFile | None:
+    def _lookup(self, asset_id: str, key: str) -> DownloadedImageFile | None:
         try:
-            record_id = pointer.read_text().strip()
+            _, pointer = _read_entry(self.root, "assets", asset_id)
+            record_id = pointer.decode().strip()
             if re.fullmatch(r"[0-9a-f]{32}", record_id) is None:
                 return None
-            record = json.loads((self.root / "acquisitions" / f"{record_id}.json").read_text())
+            _, record_data = _read_entry(self.root, "acquisitions", record_id, ".json")
+            record = json.loads(record_data)
             if record["schema_version"] != 1 or record["key"] != key:
                 return None
             digest = record["sha256"]
@@ -63,12 +80,12 @@ class ImageCache:
             extension = mimetypes.guess_extension(content_type)
             if extension is None:
                 return None
-            path = self.root / "objects" / f"{digest}{extension}"
-            if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            path, data = _read_entry(self.root, "objects", digest, extension)
+            if hashlib.sha256(data).hexdigest() != digest:
                 return None
             # Do not trust stale dimensions or a filename from the record.
             # Read dimensions from the actual verified image bytes.
-            with Image.open(path) as image:
+            with Image.open(BytesIO(data)) as image:
                 width, height = image.size
                 mode = image.mode
             return DownloadedImageFile(path, width, height, content_type, mode)
@@ -84,9 +101,9 @@ class ImageCache:
         refresh: bool = False,
         fetched_at: str | None = None,
     ) -> DownloadedImageFile:
-        pointer = self.root / "assets" / hashlib.sha256(key.encode()).hexdigest()
+        asset_id = hashlib.sha256(key.encode()).hexdigest()
         if not refresh:
-            cached = self._lookup(pointer, key)
+            cached = self._lookup(asset_id, key)
             if cached is not None:
                 return cached
 
@@ -98,18 +115,18 @@ class ImageCache:
         data = downloaded.filename.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
         extension = downloaded.filename.suffix
-        path = self.root / "objects" / f"{digest}{extension}"
+        path = sharded_path(self.root, "objects", digest, extension)
         _atomic_write(path, data)
         record: dict[str, Any] = asdict(downloaded)
         record.pop("filename")
         record.update(schema_version=1, key=key, sha256=digest, fetched_at=fetched_at)
         record_id = uuid4().hex
         _atomic_write(
-            self.root / "acquisitions" / f"{record_id}.json",
+            sharded_path(self.root, "acquisitions", record_id, ".json"),
             (json.dumps(record, indent=2) + "\n").encode(),
         )
         # Publish the pointer last. A failed refresh leaves the prior record.
-        _atomic_write(pointer, record_id.encode())
+        _atomic_write(sharded_path(self.root, "assets", asset_id), record_id.encode())
         return DownloadedImageFile(
             path, downloaded.width, downloaded.height, downloaded.content_type, downloaded.mode
         )
