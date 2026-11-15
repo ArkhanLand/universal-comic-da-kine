@@ -480,7 +480,7 @@ class LibbyOverDriveReadAdapter(InputAdapter):
                     elif asset.role == "narrative":
                         narrative.append(page)
 
-                    records.append(self._asset_record(title_dir, key, asset, image))
+                    records.append(self._asset_record(image_cache, key, asset, image))
 
                     # Persist each verified association. A later failure leaves
                     # valid originals and their per-fetch receipts intact.
@@ -496,22 +496,21 @@ class LibbyOverDriveReadAdapter(InputAdapter):
 
     @staticmethod
     def _asset_record(
-        title_dir: Path, key: str, asset: Asset, image: DownloadedImageFile
+        image_cache: ImageCache, key: str, asset: Asset, image: DownloadedImageFile
     ) -> dict[str, Any]:
         """Associate one verified object with its source component and
         receipt.
         """
-        pointer = title_dir / "assets" / hashlib.sha256(key.encode()).hexdigest()
-        receipt = pointer.read_text().strip()
+        receipt = image_cache.acquisition_path(key)
 
         return dict(
             component=asset.component,
             spine_index=asset.index,
             role=asset.role,
             source_path=asset.path,
-            object=image.filename.relative_to(title_dir).as_posix(),
+            object=image.filename.relative_to(image_cache.root).as_posix(),
             sha256=hashlib.sha256(image.filename.read_bytes()).hexdigest(),
-            acquisition=f"acquisitions/{receipt}.json",
+            acquisition=receipt.relative_to(image_cache.root).as_posix(),
             byte_count=image.filename.stat().st_size,
             width=image.width,
             height=image.height,

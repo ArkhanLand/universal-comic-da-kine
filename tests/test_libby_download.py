@@ -147,6 +147,8 @@ def test_exact_order(tmp_path, monkeypatch):
         data = (tmp_path / "libby-overdrive/123" / record["object"]).read_bytes()
         assert hashlib.sha256(data).hexdigest() == record["sha256"]
         assert len(data) == record["byte_count"]
+        receipt_path = tmp_path / "libby-overdrive/123" / record["acquisition"]
+        assert json.loads(receipt_path.read_text())["sha256"] == record["sha256"]
     saved = "".join(p.read_text() for p in tmp_path.rglob("*.json"))
     for secret in (
         "private-token",
@@ -298,15 +300,15 @@ def test_partial_receipts(tmp_path, monkeypatch):
     server.fail = "a.jpg"
     with pytest.raises(ServiceResponseError):
         server.adapter(tmp_path, monkeypatch).get_publication("123")
-    records = list(tmp_path.glob("libby-overdrive/123/acquisitions/*.json"))
+    records = list(tmp_path.glob("libby-overdrive/123/shards/acquisitions/*/*/*.json"))
     assert len(records) == 2
     capture = json.loads(next(tmp_path.glob("libby-overdrive/123/captures/*.json")).read_text())
     assert not capture["complete"]
     assert len(capture["assets"]) == 2
     server.fail = None
     server.adapter(tmp_path, monkeypatch).get_publication("123")
-    assert len(list(tmp_path.glob("libby-overdrive/123/objects/*"))) == 3
-    assert len(list(tmp_path.glob("libby-overdrive/123/acquisitions/*.json"))) == 5
+    assert len(list(tmp_path.glob("libby-overdrive/123/shards/objects/*/*/*"))) == 3
+    assert len(list(tmp_path.glob("libby-overdrive/123/shards/acquisitions/*/*/*.json"))) == 5
 
 
 def test_map_before_images(tmp_path, monkeypatch):
@@ -365,7 +367,7 @@ def test_mime_and_bytes(tmp_path, monkeypatch):
     server.images["z.jpg"] = b"not an image"
     with pytest.raises(ServiceResponseError, match="invalid image"):
         server.adapter(tmp_path, monkeypatch).get_publication("123")
-    assert len(list(tmp_path.glob("libby-overdrive/123/acquisitions/*.json"))) == 1
+    assert len(list(tmp_path.glob("libby-overdrive/123/shards/acquisitions/*/*/*.json"))) == 1
 
 
 def test_foreign_image(tmp_path, monkeypatch):
