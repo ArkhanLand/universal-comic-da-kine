@@ -459,16 +459,20 @@ def download(
     progress = _ProgressBar()
     failures = 0
 
+    def download_filename(title: str, series: str | None, issue_number: str | None) -> str:
+        filename = make_cbz_filename_from_metadata(title, series, issue_number)
+        # Marvel can assign issue number zero to multiple entries in a series.
+        if issue_number == "0" and isinstance(adapter, MarvelUnlimitedAdapter):
+            catalog_id = adapter.get_catalog_id(source)
+            return f"{filename.removesuffix('.cbz')} [Marvel {catalog_id}].cbz"
+        return filename
+
     def check_destination(
         title: str,
         series: str | None,
         issue_number: str | None,
     ) -> None:
-        destination = output_dir / make_cbz_filename_from_metadata(
-            title,
-            series,
-            issue_number,
-        )
+        destination = output_dir / download_filename(title, series, issue_number)
         if destination.exists() and not overwrite:
             raise FileExistsError(destination)
 
@@ -511,7 +515,8 @@ def download(
                             cache_dir=cache_dir / selected if cache_dir is not None else None,
                             workers=workers,
                         )
-                publication = adapters[selected].get_publication(
+                adapter = adapters[selected]
+                publication = adapter.get_publication(
                     source,
                     progress=progress.update,
                     metadata_ready=check_destination,
@@ -520,7 +525,9 @@ def download(
                 filename = (
                     make_cbz_filename_from_metadata(publication.title, None, None)
                     if publication.service == "libby-overdrive" and publication.issue_number is None
-                    else make_cbz_filename(publication)
+                    else download_filename(
+                        publication.title, publication.series, publication.issue_number
+                    )
                 )
                 destination = output_dir / filename
                 # Publish only a complete archive, including failures during writing.
