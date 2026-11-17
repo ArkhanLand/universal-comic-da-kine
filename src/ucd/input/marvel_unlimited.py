@@ -330,9 +330,6 @@ class MarvelUnlimitedAdapter(InputAdapter):
         # Scratch downloads are private to this call. Publication paths point
         # to the persistent cache and survive cleanup or another instance.
         with TemporaryDirectory(dir=WORK_PATH) as temporary:
-            # Check cached originals before downloading, so concurrency does
-            # not discard Marvel's network-saving reuse. Each request has its
-            # own scratch file; receipts and page assembly remain serial.
             keys = []
             for source in sources:
                 identity = (
@@ -341,31 +338,47 @@ class MarvelUnlimitedAdapter(InputAdapter):
                     else ["url-sha256", self._source_hash(source.url)]
                 )
                 keys.append(json.dumps(["marvelUnlimited", digital_id, "source", identity]))
-            cached_images = [
-                self.image_cache.lookup(key) if not self.refresh else None for key in keys
-            ]
+
+            # Repeated URLs share a key. Capture their initial cache state so
+            # storing one page cannot turn a later occurrence into a cache hit.
+            repeated = {
+                key: self.image_cache.lookup(key)
+                for key, count in Counter(keys).items()
+                if count > 1 and not self.refresh
+            }
 
             def fetch_image(
                 index: int, source: _MarvelPageSource
             ) -> tuple[DownloadedImageFile, str | None]:
-                cached = cached_images[index]
-                if cached is not None:
-                    return cached, None
+                # Let slow cache reads overlap with other page requests.
+                if not self.refresh:
+                    key = keys[index]
+                    cached = repeated[key] if key in repeated else self.image_cache.lookup(key)
+                    if cached is not None:
+                        return cached, None
                 image = self._download_image(source.url, Path(temporary) / str(index))
                 return image, datetime.now(UTC).isoformat(timespec="microseconds")
 
-            with closing(fetch_ordered(sources, fetch_image, self.workers)) as images:
-                for index, (downloaded, fetched_at) in images:
+            def publish_image(
+                index: int, result: tuple[DownloadedImageFile, str | None]
+            ) -> DownloadedImageFile:
+                image, fetched_at = result
+                if fetched_at is None:
+                    return image
+                return self.image_cache.acquire(
+                    keys[index], lambda: image, refresh=self.refresh, fetched_at=fetched_at
+                )
+
+            # Preserve publication order when multiple pages share a pointer.
+            cache_workers = self.workers if len(set(keys)) == len(keys) else 1
+            with (
+                closing(fetch_ordered(sources, fetch_image, self.workers)) as downloads,
+                closing(
+                    fetch_ordered((result for _, result in downloads), publish_image, cache_workers)
+                ) as images,
+            ):
+                for index, image in images:
                     source = sources[index]
-                    image = downloaded
-                    if fetched_at is not None:
-
-                        def ready(image: DownloadedImageFile = downloaded) -> DownloadedImageFile:
-                            return image
-
-                        image = self.image_cache.acquire(
-                            keys[index], ready, refresh=self.refresh, fetched_at=fetched_at
-                        )
                     page_list.append(
                         Page(
                             numbers=() if index == 0 else source.numbers,

@@ -27,8 +27,10 @@ Publication. The adapter's intermediate `get_pages()` result still uses
 Marvel and Libby use `download.parallel.fetch_ordered()` for bounded network
 concurrency, selected by `download --workers N` (positive integer, default 1).
 The helper prefetches a limited window and delivers results in source order.
-Marvel checks its verified cache before scheduling network work, then
-publishes new receipts and assembles pages on the consumer thread. Refresh
+Marvel workers check the verified cache before fetching. Repeated cache keys
+share an initial lookup and publish in order. For distinct keys, a second
+pool overlaps cache publications using the same worker count.
+Page assembly and progress follow the manifest order. Refresh
 bypasses reuse. Libby uses the same helper for component documents and images;
 only Libby needs the Mapping phase. Authentication and metadata dependencies
 remain sequential. Original image bytes, acquisition timestamps, and page

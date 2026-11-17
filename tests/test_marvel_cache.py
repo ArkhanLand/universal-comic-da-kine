@@ -179,6 +179,48 @@ def test_parallel_order(tmp_path):
     assert updates == [(count, 3) for count in range(4)]
 
 
+@pytest.mark.parametrize("workers", [2, 8, 12])
+def test_workers_overlap_downloads_and_cache_io(tmp_path, monkeypatch, workers):
+    server = MarvelServer()
+    server.order = server.order[:workers]
+    for index in range(workers - len(server.order)):
+        asset_id = f"extra-{index}"
+        server.order.append(asset_id)
+        server.images[asset_id] = server.images["one"]
+
+    handler = server.handle
+    downloading = Barrier(workers)
+    cover_started = Event()
+
+    def handle(request):
+        if request.url.host == "example.com":
+            if request.url.path.endswith("/cover.png"):
+                cover_started.set()
+            downloading.wait(timeout=5)
+        return handler(request)
+
+    server.handle = handle
+    adapter = server.adapter(tmp_path, workers=workers)
+    original_lookup = adapter.image_cache.lookup
+    original_acquire = adapter.image_cache.acquire
+    publishing = Barrier(workers)
+
+    def lookup(key):
+        if json.loads(key)[-1] == ["asset", "one"]:
+            assert cover_started.wait(timeout=5), "The cover fetch waited for a later cache check"
+        return original_lookup(key)
+
+    def publish(*args, **kwargs):
+        publishing.wait(timeout=5)
+        return original_acquire(*args, **kwargs)
+
+    monkeypatch.setattr(adapter.image_cache, "lookup", lookup)
+    monkeypatch.setattr(adapter.image_cache, "acquire", publish)
+    pages = acquire(adapter)
+    assert len(pages.pages) == workers - 1
+    assert sorted(server.downloads) == sorted(server.order)
+
+
 def test_parallel_cache(tmp_path):
     server = MarvelServer()
     first = acquire(server.adapter(tmp_path, workers=3))
