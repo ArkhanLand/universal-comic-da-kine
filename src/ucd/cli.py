@@ -427,7 +427,11 @@ def download(
         help="Seconds delay between each issue in multi-issue download; 0 disables",
     ),
     workers: int = typer.Option(
-        1, "--workers", "-w", min=1, help="Concurrent image fetches; 1 keeps sequential behavior."
+        1,
+        "--workers",
+        "-w",
+        min=1,
+        help="Concurrent image fetches and Marvel cache writes. Use 1 for sequential processing.",
     ),
     output_format: str = typer.Option("cbz", "--output-format"),
     continue_on_error: bool = typer.Option(False, "--continue-on-error"),

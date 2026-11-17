@@ -45,8 +45,9 @@ want to use. UCD will use that number of separate threads to download the
 images.
 
 For network downloads, `--workers N` overlaps up to N image fetches at once
-(any positive integer, default 1). Libby also uses that count when fetching
-component documents.
+(any positive integer, default 1). Marvel uses the same limit for a separate
+cache write pool when page cache keys are distinct. Libby also uses that count
+when fetching component documents.
 
 Authentication stays sequential, and books are processed in input order. Page
 order, original bytes, and the progress display stay the same. Marvel reuses

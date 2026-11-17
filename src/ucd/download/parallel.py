@@ -1,17 +1,18 @@
 """Overlap bounded fetches without changing the source order of results."""
 
 from collections import deque
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 
 
 def fetch_ordered[Item, Result](
-    items: Sequence[Item], fetch: Callable[[int, Item], Result], workers: int
+    items: Iterable[Item], fetch: Callable[[int, Item], Result], workers: int
 ) -> Generator[tuple[int, Result]]:
     """Keep at most workers results in flight; consume them in input order.
 
     A bounded window prevents an entire book's decoded images accumulating
-    behind one slow request. Consumers own shared state, receipts, and progress.
+    behind one slow request. Results queued before an input error are delivered
+    before that error is raised. Consumers own ordering and progress.
     On failure, cancel work not yet started and wait for running requests before
     their session or temporary directory is closed.
     """
@@ -24,17 +25,35 @@ def fetch_ordered[Item, Result](
 
     executor = ThreadPoolExecutor(max_workers=workers)
     pending: deque[tuple[int, Future[Result]]] = deque()
+    remaining = enumerate(items)
+    input_error: Exception | None = None
+
+    def submit_next() -> bool:
+        nonlocal input_error
+        if input_error is not None:
+            return False
+        try:
+            entry = next(remaining, None)
+        except Exception as exc:
+            input_error = exc
+            return False
+        if entry is None:
+            return False
+        index, item = entry
+        pending.append((index, executor.submit(fetch, index, item)))
+        return True
+
     try:
-        for index, item in enumerate(items[:workers]):
-            pending.append((index, executor.submit(fetch, index, item)))
-        next_index = len(pending)
+        for _ in range(workers):
+            if not submit_next():
+                break
 
         while pending:
             index, future = pending.popleft()
             yield index, future.result()
-            # Refill only after the caller consumes and records this result.
-            if next_index < len(items):
-                pending.append((next_index, executor.submit(fetch, next_index, items[next_index])))
-                next_index += 1
+            submit_next()
+
+        if input_error is not None:
+            raise input_error
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
