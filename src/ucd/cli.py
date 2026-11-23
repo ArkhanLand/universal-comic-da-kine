@@ -404,6 +404,11 @@ def download(
         False,
         "--overwrite",
     ),
+    include_catalog_id: bool = typer.Option(
+        False,
+        "--include-catalog-id",
+        help="Append the Marvel catalog ID to every Marvel output filename.",
+    ),
     refresh: bool = typer.Option(
         False,
         "--refresh",
@@ -465,8 +470,10 @@ def download(
 
     def download_filename(title: str, series: str | None, issue_number: str | None) -> str:
         filename = make_cbz_filename_from_metadata(title, series, issue_number)
-        # Marvel can assign issue number zero to multiple entries in a series.
-        if issue_number == "0" and isinstance(adapter, MarvelUnlimitedAdapter):
+        # Always disambiguate Marvel issue zero; optionally do so for all issues.
+        if isinstance(adapter, MarvelUnlimitedAdapter) and (
+            include_catalog_id or issue_number == "0"
+        ):
             catalog_id = adapter.get_catalog_id(source)
             return f"{filename.removesuffix('.cbz')} [Marvel {catalog_id}].cbz"
         return filename

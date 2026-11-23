@@ -616,3 +616,49 @@ def test_download_disambiguates_marvel_issue_zero(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert result.output.count("Skipped existing output:") == 2
     assert acquired == []
+
+
+@pytest.mark.parametrize("include_catalog_id", [False, True], ids=["default", "include-id"])
+def test_download_can_include_catalog_id_for_nonzero_issues(
+    tmp_path, monkeypatch, include_catalog_id
+):
+    publication = replace(
+        make_test_publication(tmp_path), title="Example", series="Example", issue_number="1"
+    )
+    acquired = []
+
+    def get_publication(self, source, progress, metadata_ready):
+        metadata_ready(publication.title, publication.series, publication.issue_number)
+        acquired.append(self.get_catalog_id(source))
+        return publication
+
+    monkeypatch.setattr(MarvelUnlimitedAdapter, "__init__", lambda self, **kwargs: None)
+    monkeypatch.setattr(MarvelUnlimitedAdapter, "get_publication", get_publication)
+    output = tmp_path / "output"
+    output.mkdir()
+    args = [
+        "download",
+        "92532",
+        "https://www.marvel.com/comics/issue/92531/example",
+        "--issue-delay",
+        "0",
+        "--output-dir",
+        str(output),
+    ]
+    if include_catalog_id:
+        args.append("--include-catalog-id")
+
+    runner = CliRunner()
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+
+    if include_catalog_id:
+        assert acquired == ["92532", "92531"]
+        assert sorted(path.name for path in output.iterdir()) == [
+            "Example #1 [Marvel 92531].cbz",
+            "Example #1 [Marvel 92532].cbz",
+        ]
+    else:
+        assert acquired == ["92532"]
+        assert sorted(path.name for path in output.iterdir()) == ["Example #1.cbz"]
+        assert result.output.count("Skipped existing output:") == 1
