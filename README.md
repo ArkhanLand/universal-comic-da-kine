@@ -196,6 +196,19 @@ untouched; it is not migrated automatically to the shared root.
 
 ### Reusing Marvel downloads
 
+By default, UCD appends `[Marvel CATALOG_ID]` to issue #0 filenames, since
+multiple Marvel catalog entries may share that issue number. Use
+`--include-catalog-id` to append the catalog ID to **all** Marvel filenames,
+including issues with nonzero numbers:
+
+```sh
+ucd download 92532 92531 --include-catalog-id -w 8
+```
+
+This prevents distinct catalog IDs with the same series and issue number from
+overwriting each other. Without the flag, filenames for nonzero issues are
+unchanged. `--overwrite` still applies to the resulting specific pathname.
+
 Marvel images are retained under the shared cache root, in `marvel-unlimited`,
 and reused by digital issue ID, page ID, and source rendition, even when
 delivery URLs change. Metadata and the page manifest are fetched on each
