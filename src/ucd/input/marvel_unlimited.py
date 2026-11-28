@@ -128,7 +128,7 @@ class MarvelUnlimitedAdapter(InputAdapter):
             service_series_id=issue_data.series_id,
             publication_date=date.fromisoformat(metadata["release_date"]),
             publisher="Marvel",
-            description=metadata["description"],
+            description=metadata.get("description") or "",
             age_rating=metadata.get("rating"),
             imprint=metadata.get("imprint"),
             thumbnail_url=f"{metadata['thumbnail']['path']}.{metadata['thumbnail']['extension']}",
